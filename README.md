@@ -41,7 +41,7 @@ The API is initially implemented with Python's standard library so the core can 
 - [Frontend/API boundary](docs/API.md)
 - [Model providers and switching](docs/MODEL_PROVIDERS.md)
 - [How to extend the system](docs/EVOLUTION_GUIDE.md)
-- [Today’s engineering log](docs/LOG-2026-08-22.md)
+- [Today’s engineering log](docs/doc/LOG-2026-08-22.md)
 
 中文版：
 
@@ -50,7 +50,7 @@ The API is initially implemented with Python's standard library so the core can 
 - [前端/API 边界（中文）](docs/zh-CN/API.md)
 - [模型供应商与切换方法（中文）](docs/zh-CN/MODEL_PROVIDERS.md)
 - [系统演进指南（中文）](docs/zh-CN/EVOLUTION_GUIDE.md)
-- [今日日志（中文）](docs/zh-CN/LOG-2026-08-22.md)
+- [今日日志（中文）](docs/doc/LOG-2026-08-22.zh-CN.md)
 
 ## Design principles
 
