@@ -19,6 +19,14 @@ This repository currently contains the v0.1 architecture and operating decisions
 - [How to extend the system](docs/EVOLUTION_GUIDE.md)
 - [Today’s engineering log](docs/LOG-2026-08-22.md)
 
+中文版：
+
+- [系统架构（中文）](docs/zh-CN/ARCHITECTURE.md)
+- [本地运行、资源与模型选择（中文）](docs/zh-CN/RUNNING_LOCALLY.md)
+- [前端/API 边界（中文）](docs/zh-CN/API.md)
+- [系统演进指南（中文）](docs/zh-CN/EVOLUTION_GUIDE.md)
+- [今日日志（中文）](docs/zh-CN/LOG-2026-08-22.md)
+
 ## Design principles
 
 1. The execution agent and the evolution controller are separate processes or roles.
