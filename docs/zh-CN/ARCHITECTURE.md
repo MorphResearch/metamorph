@@ -107,3 +107,7 @@ proposed → sandbox-tested → benchmarked → staged
 第一类任务建议限定为本地代码仓库工作：检查文件、提出 patch、运行测试并解释结果。第一批工具默认应为只读工具。写文件和执行 shell 必须受到 workspace 边界和确认策略限制。
 
 第一版可以使用小型 Python 服务、SQLite 记录运行元数据，并用普通文件系统保存产物。只有当检索 benchmark 证明有收益后，再加入向量检索。
+
+## 当前已实现的 v0.1 边界
+
+当前代码已经实现了图中的执行侧：标准库本地 HTTP API、SQLite 运行状态、JSONL 证据日志、路径受限文件系统沙箱、`list_files`/`read_file` 工具、明确受控的 `write_file` 工具、Mock 模型，以及可选的 OpenAI Responses API 适配器。Evolution Controller 目前还没有启用。

@@ -36,7 +36,7 @@ For the first UI, a simple task form, run status page, event timeline, artifact 
 
 - authenticate the API even when it is initially bound to localhost;
 - validate task and tool arguments with typed schemas;
-- never accept arbitrary filesystem paths from the browser;
+- accept a workspace identifier, not an arbitrary filesystem path, from the browser;
 - do not return raw secrets or unrestricted shell output;
 - require a separate approval action for destructive operations;
 - make each run idempotent and traceable to one configuration snapshot;

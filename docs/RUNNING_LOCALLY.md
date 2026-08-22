@@ -39,13 +39,27 @@ The phrase “512 memory” normally means 512 GB SSD storage. macOS reports the
 
 ## Base-model recommendation
 
-For this project I recommend starting with a hosted model and keeping the model adapter provider-neutral.
+For this project I recommend starting with a hosted model and keeping the model adapter provider-neutral. The runtime now supports two protocol families: OpenAI Responses for OpenAI, OpenAI-compatible Chat Completions for DeepSeek/MiniMax/GLM, and Anthropic Messages for Claude.
 
 | Role | Default | Why |
 |---|---|---|
 | Normal execution | `gpt-5.6-terra` | Good quality/cost balance for tool use and multi-step work |
 | Difficult diagnosis/evolution | `gpt-5.6-sol` | Use selectively for hard failure analysis and candidate design |
 | Routing, classification, memory gate | `gpt-5.6-luna` | Lower-cost, high-volume decisions |
+
+### Provider configuration
+
+| Provider | Protocol | Default model | API key variable | Default endpoint |
+|---|---|---|---|---|
+| OpenAI | Responses API | `gpt-5.6-terra` | `OPENAI_API_KEY` | OpenAI SDK default |
+| DeepSeek | OpenAI-compatible Chat Completions | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` | `https://api.deepseek.com` |
+| MiniMax | OpenAI-compatible Chat Completions | `MiniMax-M2.7` | `MINIMAX_API_KEY` | `https://api.minimax.io/v1` |
+| Claude | Anthropic Messages | `claude-opus-4-6` | `ANTHROPIC_API_KEY` | Anthropic SDK default |
+| GLM / Z.AI | OpenAI-compatible Chat Completions | `glm-5.1` | `ZAI_API_KEY` | `https://api.z.ai/api/paas/v4/` |
+
+Use `--provider` and optionally `--model`, `--base-url`, and `--api-key-env`. The model adapter is selected at the boundary; the runtime and tools do not know which vendor is being used.
+
+See [`configs/providers.example.env`](../configs/providers.example.env) for a credential-free configuration template. API keys must be exported in the shell or injected by a secret manager; they must not be committed to Git.
 
 These names and the balance between them follow the current official OpenAI model guidance. Use the Responses API for reasoning, tool calling, and multi-turn workflows, and pin a specific model version once experiments begin so benchmark results remain comparable. Availability, limits, and pricing depend on the account and can change; check the [official Models documentation](https://developers.openai.com/api/docs/models) and [model guidance](https://developers.openai.com/api/docs/guides/latest-model) before deployment.
 
@@ -57,6 +71,8 @@ class ModelAdapter(Protocol):
 ```
 
 Then a model comparison is an experiment, not a rewrite of the runtime.
+
+Provider-specific SDKs are optional. Install the OpenAI-compatible adapter with `pip install -e '.[openai]'` and Claude support with `pip install -e '.[anthropic]'`. The Mock provider remains dependency-free.
 
 ## Do you need a server?
 

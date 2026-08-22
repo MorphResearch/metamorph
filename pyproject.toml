@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metamorph-agent"
+version = "0.1.0"
+description = "A measurable, sandboxed self-improving agent harness"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+openai = ["openai>=1.0.0"]
+anthropic = ["anthropic>=0.30.0"]
+api = ["fastapi>=0.100.0", "uvicorn>=0.20.0"]
+dev = ["pytest>=7.0.0"]
+
+[project.scripts]
+metamorph = "metamorph.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["metamorph*"]

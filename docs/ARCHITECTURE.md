@@ -103,3 +103,7 @@ Each evolution record must also include the parent version, prompt/policy hashes
 The first useful task family is local repository work: inspect files, propose a patch, run tests, and explain the result. The first tools should be read-only by default. Write and shell execution require an explicit workspace boundary and a confirmation policy.
 
 The first implementation should be a small Python service with SQLite for run metadata and a plain filesystem for artifacts. Add vector retrieval only after a retrieval benchmark shows that it improves results.
+
+## Implemented v0.1 boundary
+
+The current code implements the execution side of this diagram: a standard-library HTTP API, SQLite run state, JSONL evidence, a path-restricted filesystem sandbox, `list_files`/`read_file` tools, an explicitly gated `write_file` tool, a Mock model, and an optional OpenAI Responses API adapter. The evolution controller is intentionally not enabled yet.

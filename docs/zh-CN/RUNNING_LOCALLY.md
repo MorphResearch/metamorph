@@ -39,13 +39,27 @@ v0.1 不需要租服务器。你的 Mac 可以运行控制面、API、SQLite 数
 
 ## 基础模型建议
 
-对于这个项目，建议先使用托管模型，并让模型适配器与供应商解耦。
+对于这个项目，建议先使用托管模型，并让模型适配器与供应商解耦。当前 runtime 支持两类协议：OpenAI 使用 Responses API；DeepSeek、MiniMax、GLM 使用 OpenAI-compatible Chat Completions；Claude 使用 Anthropic Messages API。
 
 | 角色 | 默认选择 | 原因 |
 |---|---|---|
 | 日常执行 | `gpt-5.6-terra` | 在工具调用和多步骤任务上平衡质量与成本 |
 | 困难诊断/进化 | `gpt-5.6-sol` | 只在复杂失败分析和候选设计时使用 |
 | 路由、分类、memory gate | `gpt-5.6-luna` | 适合低成本、高频率决策 |
+
+### 供应商配置
+
+| 供应商 | 协议 | 默认模型 | API key 环境变量 | 默认 endpoint |
+|---|---|---|---|---|
+| OpenAI | Responses API | `gpt-5.6-terra` | `OPENAI_API_KEY` | OpenAI SDK 默认地址 |
+| DeepSeek | OpenAI-compatible Chat Completions | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` | `https://api.deepseek.com` |
+| MiniMax | OpenAI-compatible Chat Completions | `MiniMax-M2.7` | `MINIMAX_API_KEY` | `https://api.minimax.io/v1` |
+| Claude | Anthropic Messages | `claude-opus-4-6` | `ANTHROPIC_API_KEY` | Anthropic SDK 默认地址 |
+| GLM / Z.AI | OpenAI-compatible Chat Completions | `glm-5.1` | `ZAI_API_KEY` | `https://api.z.ai/api/paas/v4/` |
+
+使用 `--provider` 切换供应商，也可以额外指定 `--model`、`--base-url` 和 `--api-key-env`。模型适配器在边界层选择，runtime 和工具不需要知道当前使用的是哪家供应商。
+
+可以参考 [`configs/providers.example.env`](../../configs/providers.example.env) 中不包含真实密钥的配置模板。API key 应通过 shell 环境变量或 secret manager 注入，不能提交到 Git。
 
 这些模型名称和定位依据当前 OpenAI 官方模型说明。推理、工具调用和多轮工作流建议使用 Responses API；实验开始后应固定具体模型版本，以便进行可比 benchmark。模型可用性、价格和限额取决于账户，并可能发生变化，部署前请查看[官方 Models 文档](https://developers.openai.com/api/docs/models)和[官方模型指导](https://developers.openai.com/api/docs/guides/latest-model)。
 
@@ -57,6 +71,8 @@ class ModelAdapter(Protocol):
 ```
 
 这样更换模型时是在做实验，而不是重写整个 runtime。
+
+OpenAI-compatible 适配器可通过 `pip install -e '.[openai]'` 安装，Claude 支持通过 `pip install -e '.[anthropic]'` 安装。Mock provider 仍然不需要任何第三方依赖。
 
 ## 是否需要服务器
 
