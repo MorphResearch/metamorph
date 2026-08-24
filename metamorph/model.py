@@ -165,7 +165,7 @@ PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "minimax": {"model": "MiniMax-M2.7", "base_url": "https://api.minimax.io/v1", "api_key_env": "MINIMAX_API_KEY"},
     "glm": {"model": "glm-5.1", "base_url": "https://api.z.ai/api/paas/v4/", "api_key_env": "ZAI_API_KEY"},
     "claude": {"model": "claude-opus-4-6", "api_key_env": "ANTHROPIC_API_KEY"},
-    "sensenova": {"model": "deepseek-v4-flash", "base_url": "https://token.sensenova.cn/v1", "api_key_env": "sk-RAJS1wDNHI83ixs1rh7RxODcurHQxVWE"},
+    "sensenova": {"model": "deepseek-v4-flash", "base_url": "https://token.sensenova.cn/v1", "api_key_env": "SENSENOVA_API_KEY"},
 }
 
 

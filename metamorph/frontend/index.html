@@ -3,76 +3,59 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Metamorph · 本地 Agent 控制台</title>
+  <title>Metamorph · AI Agent</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo">◈</span>
-      <div>
-        <h1>Metamorph</h1>
-        <p class="tagline">可观测、可回滚的本地 Agent 执行沙盒</p>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="logo">◈</span>
+        <div>
+          <h1>Metamorph</h1>
+          <p class="tagline">AI Agent 工作台</p>
+        </div>
       </div>
-    </div>
-    <div class="status-cluster">
-      <span id="conn-pill" class="pill pill-off">连接中…</span>
-      <span id="provider-pill" class="pill pill-info">—</span>
-    </div>
-  </header>
 
-  <main class="layout">
-    <section class="panel form-panel">
-      <h2>新建任务</h2>
-      <form id="task-form">
-        <label for="task-input">任务描述</label>
-        <textarea id="task-input" rows="4" placeholder="例如：检查当前工作区并总结文件结构"></textarea>
+      <button id="new-chat" class="new-chat">+ 新建对话</button>
 
-        <label for="workspace-input">工作区标识</label>
-        <input id="workspace-input" type="text" value="default" autocomplete="off" />
-        <p class="hint">仅接受简单名称（不含路径分隔符），运行时映射到 workspace_root 下的子目录。</p>
-
-        <button id="submit-btn" type="submit">提交任务</button>
-      </form>
-
-      <h2 class="history-title">运行历史</h2>
+      <div class="history-head">历史运行</div>
       <ul id="history-list" class="history-list">
         <li class="empty">暂无运行记录</li>
       </ul>
-    </section>
 
-    <section class="panel detail-panel">
-      <div id="detail-empty" class="detail-empty">
-        <p>提交一个任务，或从左侧历史中选择一条运行记录查看详情。</p>
+      <div class="sidebar-foot">
+        <span id="conn-pill" class="pill pill-off">连接中…</span>
+        <span id="provider-pill" class="pill pill-info">—</span>
       </div>
-      <div id="detail" class="detail" hidden>
-        <div class="detail-head">
-          <div>
-            <h2 id="detail-task">—</h2>
-            <code id="detail-runid" class="runid">—</code>
+    </aside>
+
+    <main class="chat">
+      <div id="messages" class="messages">
+        <div class="welcome">
+          <div class="welcome-logo">◈</div>
+          <h2>我能帮你做什么？</h2>
+          <p>描述一个任务，Agent 会规划、调用工具并执行，最后给出结果。你可以随时查看它的思考与执行过程。</p>
+          <div class="suggestions">
+            <button class="chip" data-q="检查当前工作区并总结文件结构">检查当前工作区并总结文件结构</button>
+            <button class="chip" data-q="用 Python 写一个快速排序，并加测试用例">用 Python 写一个快速排序，并加测试用例</button>
+            <button class="chip" data-q="读取 README.md 并用一句话概括这个项目">读取 README.md 并用一句话概括这个项目</button>
           </div>
-          <span id="detail-status" class="pill pill-off">—</span>
-        </div>
-
-        <div class="metrics" id="detail-metrics"></div>
-
-        <div class="answer-block" id="answer-block" hidden>
-          <h3>结果</h3>
-          <pre id="detail-answer"></pre>
-        </div>
-
-        <div class="answer-block" id="evaluation-block" hidden>
-          <h3>评估</h3>
-          <div id="detail-evaluation"></div>
-        </div>
-
-        <div class="timeline-block">
-          <h3>事件时间线</h3>
-          <ul id="event-timeline" class="timeline"></ul>
         </div>
       </div>
-    </section>
-  </main>
+
+      <div class="composer">
+        <div class="composer-row">
+          <input id="workspace-input" class="workspace-input" type="text" value="default" title="工作区标识" />
+          <label class="ws-label" for="workspace-input">工作区</label>
+        </div>
+        <div class="composer-row main-row">
+          <textarea id="prompt-input" rows="1" placeholder="给 Agent 一个任务，回车发送（Shift+Enter 换行）…"></textarea>
+          <button id="send-btn" title="发送">发送</button>
+        </div>
+      </div>
+    </main>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>
