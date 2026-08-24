@@ -30,6 +30,7 @@ python3 -m metamorph.cli run "inspect this workspace" --provider deepseek
 python3 -m metamorph.cli run "inspect this workspace" --provider minimax
 python3 -m metamorph.cli run "inspect this workspace" --provider claude
 python3 -m metamorph.cli run "inspect this workspace" --provider glm
+python3 -m metamorph.cli run "inspect this workspace" --provider sensenova
 ```
 
 The API is initially implemented with Python's standard library so the core can boot on a clean Mac. FastAPI and the OpenAI SDK are optional dependencies for the next integration layer.

@@ -28,6 +28,7 @@ class Settings:
             "minimax": "MiniMax-M2.7",
             "claude": "claude-opus-4-6",
             "glm": "glm-5.1",
+            "sensenova": "deepseek-v4-flash",
         }
         return cls(
             data_dir=selected_dir,

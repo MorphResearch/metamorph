@@ -21,3 +21,6 @@ metamorph = "metamorph.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["metamorph*"]
+
+[tool.setuptools.package-data]
+metamorph = ["frontend/*", "frontend/**/*"]

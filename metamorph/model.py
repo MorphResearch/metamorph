@@ -165,6 +165,7 @@ PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "minimax": {"model": "MiniMax-M2.7", "base_url": "https://api.minimax.io/v1", "api_key_env": "MINIMAX_API_KEY"},
     "glm": {"model": "glm-5.1", "base_url": "https://api.z.ai/api/paas/v4/", "api_key_env": "ZAI_API_KEY"},
     "claude": {"model": "claude-opus-4-6", "api_key_env": "ANTHROPIC_API_KEY"},
+    "sensenova": {"model": "deepseek-v4-flash", "base_url": "https://token.sensenova.cn/v1", "api_key_env": "sk-RAJS1wDNHI83ixs1rh7RxODcurHQxVWE"},
 }
 
 
@@ -172,7 +173,7 @@ def build_model(provider: str, model_name: str | None = None, base_url: str | No
     if provider == "mock":
         return MockModelAdapter()
     if provider not in PROVIDER_DEFAULTS:
-        raise ValueError(f"Unknown provider: {provider!r}; choose mock, openai, deepseek, minimax, claude, or glm")
+        raise ValueError(f"Unknown provider: {provider!r}; choose mock, openai, deepseek, minimax, claude, glm, or sensenova")
     defaults = PROVIDER_DEFAULTS[provider]
     selected_model = model_name or defaults["model"]
     selected_key_env = api_key_env or defaults["api_key_env"]

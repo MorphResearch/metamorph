@@ -45,6 +45,9 @@ class RunService:
     def get(self, run_id: str) -> dict[str, Any] | None:
         return self.store.get(run_id)
 
+    def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        return self.store.list_recent(limit)
+
     def events(self, run_id: str) -> list[dict[str, Any]]:
         logger = EventLogger(self.store.runs_dir / run_id)
         return logger.read_all()

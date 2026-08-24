@@ -68,3 +68,13 @@ class RunStore:
         result = dict(row)
         result["result"] = json.loads(result.pop("result_json") or "{}")
         return result
+
+    def list_recent(self, limit: int = 50) -> list[dict[str, Any]]:
+        """返回最近的运行列表（不含较大的 result_json，便于历史展示）。"""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT run_id, task, workspace, status, created_at, updated_at "
+                "FROM runs ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
