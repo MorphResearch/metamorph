@@ -1,109 +1,118 @@
-# Metamorph v0.1 architecture
+# Metamorph v0.2 Architecture
 
-## Purpose
+## Overview
 
-Metamorph is not initially intended to retrain a language model. It is a controllable evolution loop around a frozen model. The mutable part is the agent harness: prompts, planner policy, memory retrieval, skills, tools, and orchestration logic.
+Metamorph is a general-purpose, sandboxed agent harness modeled on
+[scilink-agent](../scilink-agent/)'s layered design, adapted for a local
+deployment without vertical-domain coupling.
 
-## Components
-
-```text
-                    ┌─────────────────────┐
-                    │   Web UI / CLI       │
-                    └──────────┬──────────┘
-                               │ HTTPS / localhost API
-                    ┌──────────▼──────────┐
-                    │   Task API           │
-                    │   auth + run state   │
-                    └──────────┬──────────┘
-                               │
-        ┌──────────────────────▼──────────────────────┐
-        │              Execution runtime                │
-        │ model adapter · planner · context builder    │
-        └───────────────┬───────────────┬──────────────┘
-                        │               │
-                 ┌──────▼─────┐  ┌────▼────────┐
-                 │ Memory     │  │ Tool layer  │
-                 │ read/gate  │  │ allowlists  │
-                 └──────┬─────┘  └────┬────────┘
-                        │               │
-                        └──────┬────────┘
-                               ▼
-                    ┌─────────────────────┐
-                    │ Execution sandbox   │
-                    │ bounded workspace   │
-                    └──────────┬──────────┘
-                               ▼
-                    ┌─────────────────────┐
-                    │ Evidence store      │
-                    │ runs/artifacts/logs │
-                    └──────────┬──────────┘
-                               ▼
-                    ┌─────────────────────┐
-                    │ Evaluator           │
-                    │ tests + policy      │
-                    └──────────┬──────────┘
-                               ▼
-                    ┌─────────────────────┐
-                    │ Evolution controller│
-                    │ diagnose → propose  │
-                    │ benchmark → promote │
-                    └─────────────────────┘
-```
-
-## Control plane and mutable plane
-
-The following control-plane elements must not be modified automatically in v0.1:
-
-- filesystem and network permissions;
-- secret redaction and path restrictions;
-- evaluator protocol and benchmark holdout rules;
-- promotion, rollback, and human-approval rules;
-- maximum token, time, disk, and process budgets.
-
-The initial mutable harness may contain:
-
-- `system_prompt.md` and task policies;
-- planner and tool-selection policies;
-- skills and their metadata;
-- memory retrieval and write policies;
-- low-risk, sandboxed helper tools.
-
-## Run lifecycle
+## Layered Architecture
 
 ```text
-created → running → succeeded/failed → evaluated → archived
+┌─────────────────────────────────────────────────────────┐
+│  Entry Layer                                             │
+│  main.py  ·  cli/                                        │
+├──────────────────────┬──────────────────────────────────┤
+│  HTTP API Layer      │  Command-Line Interface           │
+│  api/                │  cli/                             │
+│    router.py         │    main.py (argparse)             │
+│    middleware.py     │                                   │
+│    workers.py        │                                   │
+│    v1/               │                                   │
+│      info.py         │                                   │
+│      runs.py         │                                   │
+│      tasks.py        │                                   │
+├──────────────────────┴──────────────────────────────────┤
+│  Agent Execution Layer                                   │
+│  graphs/                                                 │
+│    agent.py     (high-level entry: run_agent)            │
+│    loop.py      (agent → tools → agent orchestration)   │
+│    streaming.py (chunk parsing, reasoning extraction)   │
+├───────────────┬──────────────────┬──────────────────────┤
+│  LLM Layer    │  Memory Layer    │  Tools Layer          │
+│  llm/         │  memory/         │  tools/               │
+│    client.py  │    user_memory   │    base.py            │
+│    providers  │    formatter.py  │    web.py             │
+│    thinking   │                  │    document.py        │
+├───────────────┴──────────────────┴──────────────────────┤
+│  Configuration · State · Prompts                         │
+│  config/     state/        prompts/                     │
+│    settings  events.py     system_prompt.py             │
+│           store.py                                              │
+└─────────────────────────────────────────────────────────┘
 ```
 
-An evolution lifecycle is separate:
+## Layer Responsibilities
+
+| Layer | Package | Responsibility |
+|-------|---------|----------------|
+| **Entry** | `main.py`, `cli/` | Thin entrypoint + argparse CLI (`run` / `serve`) |
+| **HTTP API** | `api/` | Routing, middleware, task worker lifecycle, v1 sub-routes |
+| **Agent Graph** | `graphs/` | LLM loop orchestration, streaming chunk parsing |
+| **LLM** | `llm/` | Provider defaults, client construction, thinking config |
+| **Memory** | `memory/` | Cross-session user memory persistence + prompt formatting |
+| **Tools** | `tools/` | Tool registry, pydantic schemas, dispatch, web/doc tools |
+| **Config** | `config/` | Settings dataclass from environment variables |
+| **State** | `state/` | Event logger (JSONL) + Run store (SQLite) |
+| **Prompts** | `prompts/` | System prompt template |
+
+## Key Design Decisions
+
+### 1. Provider Defaults as Single Source of Truth
+`llm/providers.py` holds the authoritative `PROVIDER_DEFAULTS` dict.
+`config/settings.py` and `llm/client.py` both import from it — no duplication.
+
+### 2. Split Graph Layer
+- `streaming.py`: pure chunk parsing (testable in isolation)
+- `loop.py`: core agent→tools→agent orchestration
+- `agent.py`: thin composition entry point
+
+### 3. Independent Memory Layer
+Memory data-access (`memory/user_memory.py`) is decoupled from the
+agent tool registration (`tools/memory.py`). Prompt formatting
+(`memory/formatter.py`) is a pure function over the data layer.
+
+### 4. Versioned API Routes
+`api/v1/{info,runs,tasks}.py` mirrors scilink-agent's `api/v1/` layout.
+`api/router.py` dispatches on path prefix; `api/middleware.py` provides
+shared helpers (JSON response, static serving, path-traversal guard).
+
+### 5. Thinking Config
+`llm/thinking.py` handles model-specific reasoning/thinking parameters
+(DeepSeek V4 vs V3), mirroring scilink-agent's `thinking_config.py`.
+
+### 6. Backward Compatibility
+- `api/routes.py` re-exports `serve` from `router.py`
+- `api/service.py` aliases `TaskWorker` as `RunService`
+- All existing import paths continue to work
+
+## Tool Registry
+
+| Tool | Category | Description |
+|------|----------|-------------|
+| `web_search` | web | DuckDuckGo search (no API key) |
+| `web_fetch` | web | Fetch URL body as text |
+| `read_document` | document | Read txt/md/json/csv/pdf/docx from workspace |
+| `update_user_memory` | memory | CRUD cross-session memories (user/feedback/project/reference) |
+
+## Run Lifecycle
 
 ```text
-proposed → sandbox-tested → benchmarked → staged
-         → human-approved → promoted
-         └──────────────────────────────→ rejected/rollback
+queued → running → completed | failed
 ```
 
-The production version is never overwritten while a task is running. A candidate receives its own workspace, configuration snapshot, dependency manifest, and benchmark report.
+Each run produces:
+- `.metamorph/runs/{run_id}/events.jsonl` — append-only event log
+- `.metamorph/runs/{run_id}/result.json` — final result snapshot
+- SQLite `runs.db` row — run metadata
 
-## Evidence and versioning
+## Provider Support
 
-Each run should record structured events rather than hidden chain-of-thought:
-
-- task input and permitted paths;
-- model and configuration identifiers;
-- tool name, validated arguments, result, exit status, and duration;
-- compact decision summary supplied by the model;
-- produced artifacts and content hashes;
-- deterministic test results;
-- token usage, latency, errors, and safety events.
-
-Each evolution record must also include the parent version, prompt/policy hashes, memory snapshot, tool versions, benchmark version, evaluator version, and environment information. Git alone is not enough to reproduce a run.
-
-## Initial implementation boundary
-
-The first useful task family is local repository work: inspect files, propose a patch, run tests, and explain the result. The first tools should be read-only by default. Write and shell execution require an explicit workspace boundary and a confirmation policy.
-
-The first implementation should be a small Python service with SQLite for run metadata and a plain filesystem for artifacts. Add vector retrieval only after a retrieval benchmark shows that it improves results.
-
-## Implemented v0.1 boundary
-
-The current code implements the execution side of this diagram: a standard-library HTTP API, SQLite run state, JSONL evidence, a path-restricted filesystem sandbox, `list_files`/`read_file` tools, an explicitly gated `write_file` tool, a Mock model, and an optional OpenAI Responses API adapter. The evolution controller is intentionally not enabled yet.
+| Provider | Default Model | Base URL | API Key Env |
+|----------|--------------|----------|-------------|
+| openai | gpt-5.6-terra | — | OPENAI_API_KEY |
+| deepseek | deepseek-v4-pro | api.deepseek.com | DEEPSEEK_API_KEY |
+| minimax | MiniMax-M2.7 | api.minimax.io/v1 | MINIMAX_API_KEY |
+| glm | glm-5.1 | api.z.ai/api/paas/v4/ | ZAI_API_KEY |
+| claude | claude-opus-4-6 | — | ANTHROPIC_API_KEY |
+| sensenova | deepseek-v4-flash | token.sensenova.cn/v1 | SENSENOVA_API_KEY |

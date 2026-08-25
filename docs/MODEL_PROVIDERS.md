@@ -114,7 +114,7 @@ export METAMORPH_API_KEY_ENV=DEEPSEEK_API_KEY
 
 `METAMORPH_BASE_URL` is used by the OpenAI-compatible adapter. It is not used by the Claude adapter. `METAMORPH_API_KEY_ENV` contains the **name** of an environment variable, not the secret itself.
 
-Never put a real API key in this repository, `.env` files committed to Git, task payloads, trajectories, or frontend code. Use the credential-free template at [`configs/providers.example.env`](../configs/providers.example.env).
+Never put a real API key in this repository, `.env` files committed to Git, task payloads, trajectories, or frontend code. Use the credential-free template at [`.env.example`](../.env.example).
 
 ## What “compatible” means here
 

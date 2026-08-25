@@ -149,6 +149,36 @@ body {
 .chain-empty { color: var(--muted); font-size: 13px; padding: 4px 0; }
 
 .chain-item { border: 1px solid var(--border); border-radius: 10px; margin-top: 8px; background: var(--panel-2); overflow: hidden; }
+
+/* 思考过程折叠面板（对齐 scilink-agent 的思考折叠） */
+.thinking {
+  border: 1px solid #dbe4ff;
+  background: #f3f6ff;
+  border-radius: 10px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+.thinking > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3a4a7a;
+  user-select: none;
+  background: #fff;
+  border-bottom: 1px solid #dbe4ff;
+}
+.thinking > summary::-webkit-details-marker { color: #3a4a7a; }
+.thinking .think-body {
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #364050;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow-y: auto;
+}
 .chain-item.think { background: #f3f6ff; border-color: #dbe4ff; }
 .chain-item.tool { background: #f6f8fb; }
 .ci-head {

@@ -121,9 +121,20 @@ function scrollBottom() {
 }
 
 // 构建一条"思考/动作"条目（对话式思考链）
-function buildChainItem(ev) {
+function buildChainItem(ev, runId) {
   const type = ev.type || "event";
   const time = (ev.timestamp || "").replace("T", " ").slice(0, 19);
+
+  // 0) DeepSeek 思考链（reasoning）—— 折叠面板，逐步累加
+  if (type === "reasoning") {
+    const wrap = ensureThinkingPanel(runId);
+    if (ev.text) {
+      wrap._buf = (wrap._buf || "") + ev.text;
+      wrap.querySelector(".think-body").textContent = wrap._buf;
+      scrollBottom();
+    }
+    return null;
+  }
 
   // 1) LLM 的规划/思考（model.decision）
   if (type === "model.decision") {
@@ -173,15 +184,40 @@ function buildChainItem(ev) {
   return null;
 }
 
+// 每个 run 一个可折叠的"思考过程"面板（对齐 scilink-agent 的思考折叠）
+function ensureThinkingPanel(runId) {
+  const msg = document.querySelector(`.msg.assistant[data-run-id="${runId}"]`);
+  if (!msg) return { _buf: "", querySelector: () => ({ textContent: "" }) };
+  let panel = msg._thinkPanel;
+  if (!panel) {
+    panel = document.createElement("details");
+    panel.className = "thinking";
+    panel.open = true;
+    panel.innerHTML =
+      `<summary>💭 思考过程</summary>` +
+      `<div class="think-body"></div>`;
+    msg.querySelector(".chain").appendChild(panel);
+    panel._buf = "";
+    msg._thinkPanel = panel;
+    scrollBottom();
+  }
+  return panel;
+}
+
 // 把 run 的事件渲染进某条 assistant 消息（思考链）
 function renderEventsInto(msgEl, events) {
   const chainEl = msgEl.querySelector(".chain");
   chainEl.innerHTML = "";
+  const runId = msgEl.dataset.runId;
   let hasContent = false;
   events.forEach((ev) => {
-    const item = buildChainItem(ev);
+    const item = buildChainItem(ev, runId);
     if (item) { chainEl.appendChild(item); hasContent = true; }
   });
+  // 思考过程面板（reasoning 事件）算作内容
+  if (msgEl._thinkPanel && msgEl._thinkPanel.querySelector(".think-body").textContent) {
+    hasContent = true;
+  }
   if (!hasContent) {
     chainEl.innerHTML = `<div class="chain-empty">正在连接模型…</div>`;
   }

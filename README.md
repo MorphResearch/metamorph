@@ -1,62 +1,78 @@
 # Metamorph
 
-Metamorph is a research-oriented, self-improving agent harness. It starts with a frozen foundation model and improves the surrounding system—tools, skills, memory policies, prompts, and control logic—through an evaluated, versioned, and reversible loop.
+一个本地运行、可联网检索并具备跨会话记忆的**通用智能体**（General-purpose Agent）。
+架构参考 scilink-agent 的分层设计，但业务逻辑保持通用，不绑定任何垂直领域。
+
+## 架构
 
 ```text
-task → execute in sandbox → record evidence → evaluate → diagnose
-     → propose candidate → benchmark → approve/promote or reject/rollback
+用户输入 → HTTP API → RunService → agent.executor（agent→tools 循环）
+                                  ├─ 思考链提取（reasoning_content）
+                                  ├─ 工具调用（联网检索 / 文档读取 / 记忆）
+                                  └─ 事件日志（EventLogger，前端思考折叠 + 工具卡片）
 ```
 
-## Current status
+### 代码分层
 
-The v0.1 baseline is now runnable: it includes a path-restricted workspace, read-only tools, explicit write approval, Mock plus OpenAI/DeepSeek/MiniMax/Claude/GLM model adapters, structured JSONL evidence, SQLite run state, a local HTTP API, and a deterministic baseline evaluator. Automatic evolution, memory learning, and Multi-Agent orchestration remain later milestones.
+| 包 / 模块 | 职责 |
+|-----------|------|
+| `llm/` | 模型接入层：各 provider 默认配置 + OpenAI 兼容 client 构造 |
+| `graphs/` | 智能体核心：agent→tools 循环 + 思考链提取（对应 scilink `graphs/`） |
+| `prompts/` | 通用系统提示（对应 scilink `prompts/`） |
+| `tools/` | 工具集（对应 scilink `tools/`） |
+| ├─ `base.py` | 注册表 + pydantic→OpenAI schema 转换 + dispatch |
+| ├─ `web.py` | `web_search` / `web_fetch` |
+| ├─ `document.py` | `read_document` |
+| └─ `memory.py` | `update_user_memory`（本地 JSONL 跨会话记忆） |
+| `state/` | 运行状态：`events.py` 事件日志 + `store.py` SQLite 运行记录（history 持久化） |
+| `api/` | HTTP 接口层：`routes.py` 路由 + `service.py` 编排 + `frontend/` 前端 |
+| `config/` | 应用配置（`settings.py` 定义 `Settings`） |
+| `cli/` | 命令行入口（`serve` / `run`） |
 
-Run without any API key:
+## 快速开始
 
 ```bash
-python3 -m metamorph.cli run "inspect this workspace" --workspace . --model-mode mock
+pip install -e ".[openai,tools]"      # 核心 + 可选工具依赖
+
+# 设置凭证（仅当前终端会话，不落盘）
+export SENSENOVA_API_KEY="sk-xxx"      # Windows PowerShell: $env:SENSENOVA_API_KEY="sk-xxx"
+
+# 启动本地服务
+metamorph serve --provider sensenova --port 8787
 ```
 
-Start the local API:
+打开 http://127.0.0.1:8787 即可在页面中与 agent 对话，实时看到：
+**思考过程（可折叠）+ 工具调用卡片 + 最终回答**。
+
+### 命令行直接运行
 
 ```bash
-python3 -m metamorph.cli serve --model-mode mock
+metamorph run "帮我查一下今天上海的天气" --provider sensenova
 ```
 
-Switch providers without changing the runtime:
+## 支持的模型供应商
+
+`openai` / `deepseek` / `minimax` / `glm` / `claude` / `sensenova`
+（默认 `sensenova`，模型 `deepseek-v4-flash`）。
+
+切换供应商无需改动代码：
 
 ```bash
-python3 -m metamorph.cli run "inspect this workspace" --provider deepseek
-python3 -m metamorph.cli run "inspect this workspace" --provider minimax
-python3 -m metamorph.cli run "inspect this workspace" --provider claude
-python3 -m metamorph.cli run "inspect this workspace" --provider glm
-python3 -m metamorph.cli run "inspect this workspace" --provider sensenova
+python -m metamorph.cli serve --provider deepseek
+python -m metamorph.cli serve --provider openai
 ```
 
-The API is initially implemented with Python's standard library so the core can boot on a clean Mac. FastAPI and the OpenAI SDK are optional dependencies for the next integration layer.
+配置示例见 `.env.example`。
 
-## Start here
+## 测试
 
-- [Local resources, model choice, and deployment](docs/RUNNING_LOCALLY.md)
-- [System architecture](docs/ARCHITECTURE.md)
-- [Frontend/API boundary](docs/API.md)
-- [Model providers and switching](docs/MODEL_PROVIDERS.md)
-- [How to extend the system](docs/EVOLUTION_GUIDE.md)
-- [Today’s engineering log](docs/doc/LOG-2026-08-22.md)
+```bash
+pytest
+```
 
-中文版：
+## 设计原则
 
-- [系统架构（中文）](docs/zh-CN/ARCHITECTURE.md)
-- [本地运行、资源与模型选择（中文）](docs/zh-CN/RUNNING_LOCALLY.md)
-- [前端/API 边界（中文）](docs/zh-CN/API.md)
-- [模型供应商与切换方法（中文）](docs/zh-CN/MODEL_PROVIDERS.md)
-- [系统演进指南（中文）](docs/zh-CN/EVOLUTION_GUIDE.md)
-- [今日日志（中文）](docs/doc/LOG-2026-08-22.zh-CN.md)
-
-## Design principles
-
-1. The execution agent and the evolution controller are separate processes or roles.
-2. The current version is never edited in place by an agent.
-3. Every candidate must pass deterministic tests, regression tests, and safety checks before promotion.
-4. The safety policy, evaluator protocol, and rollback mechanism are protected control-plane code.
-5. Multi-agent orchestration comes after the single-agent loop is measurable.
+1. 架构对齐 scilink-agent 的分层，但业务逻辑通用，无垂直领域硬编码。
+2. 模型接入与 agent 逻辑解耦：新增 provider 只需在 `llm/client.py` 的 `PROVIDER_DEFAULTS` 登记。
+3. 工具即插即用：在 `agent/tools/` 下用 `register()` 声明，自动进入 schema 与 UI。
+4. 所有运行证据（事件、结果）落盘可回溯；刷新页面可恢复完整思考链与工具轨迹。

@@ -59,7 +59,7 @@ v0.1 不需要租服务器。你的 Mac 可以运行控制面、API、SQLite 数
 
 使用 `--provider` 切换供应商，也可以额外指定 `--model`、`--base-url` 和 `--api-key-env`。模型适配器在边界层选择，runtime 和工具不需要知道当前使用的是哪家供应商。
 
-可以参考 [`configs/providers.example.env`](../../configs/providers.example.env) 中不包含真实密钥的配置模板。API key 应通过 shell 环境变量或 secret manager 注入，不能提交到 Git。
+可以参考 [`.env.example`](../../.env.example) 中不包含真实密钥的配置模板。API key 应通过 shell 环境变量或 secret manager 注入，不能提交到 Git。
 
 这些模型名称和定位依据当前 OpenAI 官方模型说明。推理、工具调用和多轮工作流建议使用 Responses API；实验开始后应固定具体模型版本，以便进行可比 benchmark。模型可用性、价格和限额取决于账户，并可能发生变化，部署前请查看[官方 Models 文档](https://developers.openai.com/api/docs/models)和[官方模型指导](https://developers.openai.com/api/docs/guides/latest-model)。
 

@@ -59,7 +59,7 @@ For this project I recommend starting with a hosted model and keeping the model 
 
 Use `--provider` and optionally `--model`, `--base-url`, and `--api-key-env`. The model adapter is selected at the boundary; the runtime and tools do not know which vendor is being used.
 
-See [`configs/providers.example.env`](../configs/providers.example.env) for a credential-free configuration template. API keys must be exported in the shell or injected by a secret manager; they must not be committed to Git.
+See [`.env.example`](../.env.example) for a credential-free configuration template. API keys must be exported in the shell or injected by a secret manager; they must not be committed to Git.
 
 These names and the balance between them follow the current official OpenAI model guidance. Use the Responses API for reasoning, tool calling, and multi-turn workflows, and pin a specific model version once experiments begin so benchmark results remain comparable. Availability, limits, and pricing depend on the account and can change; check the [official Models documentation](https://developers.openai.com/api/docs/models) and [model guidance](https://developers.openai.com/api/docs/guides/latest-model) before deployment.
 

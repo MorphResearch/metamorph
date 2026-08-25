@@ -114,7 +114,7 @@ export METAMORPH_API_KEY_ENV=DEEPSEEK_API_KEY
 
 `METAMORPH_BASE_URL` 只用于 OpenAI-compatible adapter；Claude adapter 不使用它。`METAMORPH_API_KEY_ENV` 填的是环境变量的**名称**，不是密钥本身。
 
-不要把真实 API key 放入仓库、提交到 Git 的 `.env`、task payload、trajectory 或前端代码。可以参考 [`configs/providers.example.env`](../../configs/providers.example.env) 中不包含真实密钥的模板。
+不要把真实 API key 放入仓库、提交到 Git 的 `.env`、task payload、trajectory 或前端代码。可以参考 [`.env.example`](../../.env.example) 中不包含真实密钥的模板。
 
 ## 这里的“兼容”是什么意思
 

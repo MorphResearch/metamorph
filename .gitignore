@@ -1,9 +1,23 @@
-.DS_Store
+# Python
 __pycache__/
 *.py[cod]
-.venv/
-.env
-.metamorph/
-dist/
-build/
 *.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Local data & runtime artifacts
+.metamorph/
+logs/
+serve.log
+serve.err
+.metamorph_serve.*
+
+# Secrets / local data
+.env
+.env.*
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
