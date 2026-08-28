@@ -76,10 +76,34 @@ class StoreTests(unittest.TestCase):
 
     def test_run_lifecycle(self):
         store = RunStore(Path(self._tmp))
-        run_id = store.create("hello", Path("."))
+        run_id, conv_id = store.create("hello", Path("."))
         self.assertIsNotNone(store.get(run_id))
+        self.assertIsNotNone(conv_id)
         store.update(run_id, "completed", {"answer": "hi"})
         self.assertEqual(store.get(run_id)["status"], "completed")
+
+    def test_conversation_history(self):
+        store = RunStore(Path(self._tmp))
+        _, conv_id = store.create("first question", Path("."))
+        store.append_message(conv_id, "user", "Hi, I'm Alice")
+        store.append_message(conv_id, "assistant", "Hello Alice!")
+        history = store.get_conversation(conv_id)
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["role"], "user")
+        self.assertEqual(history[0]["content"], "Hi, I'm Alice")
+        self.assertEqual(history[1]["role"], "assistant")
+        self.assertEqual(history[1]["content"], "Hello Alice!")
+
+    def test_conversation_continuity(self):
+        store = RunStore(Path(self._tmp))
+        _, conv_id = store.create("q1", Path("."))
+        store.append_message(conv_id, "user", "What is 1+1?")
+        store.append_message(conv_id, "assistant", "2")
+        # Same conversation_id → second run picks up history
+        _, second_conv_id = store.create("q2", Path("."), conversation_id=conv_id)
+        self.assertEqual(second_conv_id, conv_id)
+        history = store.get_conversation(conv_id)
+        self.assertEqual(len(history), 2)
 
 
 class ExecutorLoopTests(unittest.TestCase):

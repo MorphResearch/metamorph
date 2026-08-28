@@ -22,13 +22,23 @@ from .streaming import iter_stream
 def _build_conversation(
     messages: list[dict[str, str]],
     data_dir: Path,
+    history: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Prepend the system prompt (with memory injection) to user messages."""
+    """Prepend the system prompt (with memory injection) to user messages.
+
+    ``history`` is a list of prior ``role``/``content`` messages from the
+    same conversation.  They are spliced in *before* the newest user turn so
+    the model sees the full conversation context.
+    """
     system_content = SYSTEM_PROMPT
     memories = format_memories(data_dir)
     if memories:
         system_content += "\n\n# 已知的用户长期记忆\n" + memories
-    return [{"role": "system", "content": system_content}] + list(messages)
+    convo: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
+    if history:
+        convo.extend(list(history))
+    convo.extend(list(messages))
+    return convo
 
 
 def run_loop(

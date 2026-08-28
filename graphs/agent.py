@@ -23,14 +23,17 @@ def run_agent(
     workspace_root: Path,
     max_turns: int = 12,
     emit: Callable[[str, dict[str, Any]], None] | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> str:
     """Run the agent loop. Returns the final assistant answer text.
 
-    ``emit`` (optional) is called with ``(event_name, payload)`` for live
-    streaming to the UI; otherwise events go through ``logger``.
+    ``history`` is the conversation message history (role/content pairs) to
+    splice in before the newest user turn.  ``emit`` (optional) is called
+    with ``(event_name, payload)`` for live streaming to the UI; otherwise
+    events go through ``logger``.
     """
     ctx = {"data_dir": Path(data_dir), "workspace_root": Path(workspace_root)}
-    convo = _build_conversation(messages, ctx["data_dir"])
+    convo = _build_conversation(messages, ctx["data_dir"], history=history)
     return run_loop(
         client=client,
         model_name=model_name,

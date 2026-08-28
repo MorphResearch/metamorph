@@ -37,19 +37,40 @@ class TaskWorker:
     def client(self) -> Any:
         return self._client
 
-    def submit(self, task: str, workspace: Path) -> str:
-        """Register a new run and start a background worker thread."""
+    def submit(
+        self,
+        task: str,
+        workspace: Path,
+        conversation_id: str | None = None,
+    ) -> tuple[str, str]:
+        """Register a new run and start a background worker thread.
+
+        If ``conversation_id`` is provided, prior messages from that
+        conversation are merged into the prompt so the model has full
+        dialogue context.  Returns ``(run_id, conversation_id)``.
+        """
         resolved = workspace.expanduser().resolve()
-        run_id = self.store.create(task, resolved)
+        run_id, conv_id = self.store.create(task, resolved, conversation_id=conversation_id)
+        history = self.store.get_conversation(conv_id) if conv_id else []
         thread = threading.Thread(
-            target=self._run, args=(run_id, task, resolved), daemon=True, name=f"worker-{run_id}"
+            target=self._run,
+            args=(run_id, conv_id, task, resolved, history),
+            daemon=True,
+            name=f"worker-{run_id}",
         )
         with self._lock:
             self._workers.append(thread)
         thread.start()
-        return run_id
+        return run_id, conv_id
 
-    def _run(self, run_id: str, task: str, workspace: Path) -> None:
+    def _run(
+        self,
+        run_id: str,
+        conversation_id: str,
+        task: str,
+        workspace: Path,
+        history: list[dict[str, str]],
+    ) -> None:
         run_dir = self.store.runs_dir / run_id
         logger = EventLogger(run_dir)
         self.store.update(run_id, "running")
@@ -62,9 +83,14 @@ class TaskWorker:
                 data_dir=self.settings.data_dir,
                 workspace_root=workspace,
                 max_turns=self.settings.max_steps,
+                history=history,
             )
+            # Persist both sides of the exchange to conversation history.
+            self.store.append_message(conversation_id, "user", task)
+            self.store.append_message(conversation_id, "assistant", answer)
             result: dict[str, Any] = {
                 "run_id": run_id,
+                "conversation_id": conversation_id,
                 "status": "completed",
                 "answer": answer,
                 "provider": self.client.provider,
@@ -75,7 +101,7 @@ class TaskWorker:
             self.store.update(run_id, result["status"], result)
         except Exception as exc:
             logger.emit("run.error", error=str(exc))
-            result = {"run_id": run_id, "status": "failed", "error": str(exc)}
+            result = {"run_id": run_id, "conversation_id": conversation_id, "status": "failed", "error": str(exc)}
             self.store.update(run_id, "failed", result)
 
     def get(self, run_id: str) -> dict[str, Any] | None:

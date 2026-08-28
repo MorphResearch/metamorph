@@ -30,6 +30,10 @@ def submit_task(
         json_response(handler, 400, {"error": "task is required"})
         return
 
+    conversation_id = payload.get("conversation_id")
+    if conversation_id:
+        conversation_id = str(conversation_id).strip() or None
+
     try:
         workspace_id = safe_workspace_id(payload.get("workspace_id", "default"))
     except ValueError as exc:
@@ -37,5 +41,5 @@ def submit_task(
         return
 
     workspace = worker.settings.workspace_root / workspace_id
-    run_id = worker.submit(task, workspace)
-    json_response(handler, 202, {"run_id": run_id, "status": "queued"})
+    run_id, conv_id = worker.submit(task, workspace, conversation_id=conversation_id)
+    json_response(handler, 202, {"run_id": run_id, "conversation_id": conv_id, "status": "queued"})
