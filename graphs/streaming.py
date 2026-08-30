@@ -65,7 +65,7 @@ def non_streaming_call(
     """Non-streaming fallback: invoke once, parse ``content`` + ``tool_calls``."""
     resp = client.chat.completions.create(
         model=model_name,
-        messages=message,
+        messages=messages,
         tools=tools,
         tool_choice="auto",
         max_tokens=4096,

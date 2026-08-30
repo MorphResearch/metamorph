@@ -8,6 +8,10 @@ Adding a new provider means adding one entry here.
 from __future__ import annotations
 
 PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
+    "mock": {
+        "model": "mock-v0",
+        "api_key_env": "",
+    },
     "openai": {
         "model": "gpt-5.6-terra",
         "api_key_env": "OPENAI_API_KEY",

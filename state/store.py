@@ -97,6 +97,20 @@ class RunStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_conversation_runs(self, conversation_id: str) -> list[dict[str, Any]]:
+        """Return all runs in one conversation, oldest first."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM runs WHERE conversation_id = ? ORDER BY created_at ASC",
+                (conversation_id,),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["result"] = json.loads(item.pop("result_json") or "{}")
+            result.append(item)
+        return result
+
     def get_conversations(self, limit: int = 50) -> list[dict[str, Any]]:
         """List distinct conversations with latest message preview."""
         with self._connect() as connection:

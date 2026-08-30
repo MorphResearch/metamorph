@@ -4,7 +4,7 @@
 
 Metamorph separates the model adapter from the runtime. The runtime only asks a provider adapter for one validated `Decision`; it does not know whether the response came from OpenAI, DeepSeek, MiniMax, Claude, or GLM.
 
-In v0.1, provider selection is **process-level**: choose one provider before starting the CLI or API server. Per-task model routing is a later feature and will be added after the benchmark and cost accounting layers are stable.
+In v0.1, provider selection is **process-level**: choose one provider before starting the CLI or API server. The default is DeepSeek. Per-task model routing is a later feature and will be added after the benchmark and cost accounting layers are stable.
 
 ## Supported providers
 
@@ -32,7 +32,7 @@ Official protocol references:
 Mock mode has no third-party dependency:
 
 ```bash
-python3 -m metamorph.cli run "inspect this workspace" --provider mock
+python3 main.py run "inspect this workspace" --provider mock
 ```
 
 OpenAI-compatible providers use the OpenAI Python SDK:
@@ -52,7 +52,7 @@ pip install -e '.[anthropic]'
 The provider is selected with `--provider`:
 
 ```bash
-python3 -m metamorph.cli run "inspect this workspace" \
+python3 main.py run "inspect this workspace" \
   --provider deepseek \
   --model deepseek-v4-pro \
   --workspace .
@@ -61,10 +61,10 @@ python3 -m metamorph.cli run "inspect this workspace" \
 Examples:
 
 ```bash
-python3 -m metamorph.cli run "inspect this workspace" --provider minimax
-python3 -m metamorph.cli run "inspect this workspace" --provider claude
-python3 -m metamorph.cli run "inspect this workspace" --provider glm
-python3 -m metamorph.cli run "inspect this workspace" --provider openai
+python3 main.py run "inspect this workspace" --provider minimax
+python3 main.py run "inspect this workspace" --provider claude
+python3 main.py run "inspect this workspace" --provider glm
+python3 main.py run "inspect this workspace" --provider openai
 ```
 
 `--model-mode mock` and `--model-mode openai` remain as backwards-compatible aliases for older commands.
@@ -78,7 +78,7 @@ export METAMORPH_PROVIDER=glm
 export METAMORPH_MODEL=glm-5.1
 export ZAI_API_KEY="replace-me"
 
-python3 -m metamorph.cli serve
+python3 main.py serve
 ```
 
 Other examples:
@@ -133,7 +133,7 @@ The runtime validates the action before executing it. v0.1 does not yet use each
 
 ## Adding another provider
 
-If a new provider is OpenAI-compatible, add its endpoint, key variable, and default model to `PROVIDER_DEFAULTS` in `metamorph/model.py`. If it uses a different protocol, implement a new adapter satisfying:
+If a new provider is OpenAI-compatible, add its endpoint, key variable, and default model to `PROVIDER_DEFAULTS` in `llm/providers.py`. If it uses a different protocol, implement a new adapter satisfying:
 
 ```python
 class ModelAdapter(Protocol):

@@ -19,7 +19,7 @@
 
       <button id="new-chat" class="new-chat">+ 新建对话</button>
 
-      <div class="history-head">历史运行</div>
+      <div class="history-head">历史对话</div>
       <ul id="history-list" class="history-list">
         <li class="empty">暂无运行记录</li>
       </ul>
@@ -31,11 +31,18 @@
     </aside>
 
     <main class="chat">
+      <header class="chat-header">
+        <div>
+          <h2 id="chat-title">新建任务</h2>
+          <p id="chat-subtitle">输入任务开始一次新的 Agent 运行</p>
+        </div>
+        <span class="chat-hint">对话上下文会保存在本地</span>
+      </header>
       <div id="messages" class="messages">
         <div class="welcome">
           <div class="welcome-logo">◈</div>
           <h2>我能帮你做什么？</h2>
-          <p>描述一个任务，Agent 会规划、调用工具并执行，最后给出结果。你可以随时查看它的思考与执行过程。</p>
+          <p>描述一个任务，Agent 会规划、调用工具并执行。你可以连续追问，也可以展开查看思考、工具调用和多 Agent 评估。</p>
           <div class="suggestions">
             <button class="chip" data-q="检查当前工作区并总结文件结构">检查当前工作区并总结文件结构</button>
             <button class="chip" data-q="用 Python 写一个快速排序，并加测试用例">用 Python 写一个快速排序，并加测试用例</button>
@@ -48,6 +55,10 @@
         <div class="composer-row">
           <input id="workspace-input" class="workspace-input" type="text" value="default" title="工作区标识" />
           <label class="ws-label" for="workspace-input">工作区</label>
+          <select id="agent-mode" class="workspace-input" title="Agent 模式">
+            <option value="single">单 Agent</option>
+            <option value="multiagent">自适应多 Agent</option>
+          </select>
         </div>
         <div class="composer-row main-row">
           <textarea id="prompt-input" rows="1" placeholder="给 Agent 一个任务，回车发送（Shift+Enter 换行）…"></textarea>

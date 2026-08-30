@@ -34,6 +34,11 @@ def submit_task(
     if conversation_id:
         conversation_id = str(conversation_id).strip() or None
 
+    mode = str(payload.get("mode", worker.settings.mode)).strip() or worker.settings.mode
+    if mode not in {"single", "multiagent"}:
+        json_response(handler, 400, {"error": "mode must be single or multiagent"})
+        return
+
     try:
         workspace_id = safe_workspace_id(payload.get("workspace_id", "default"))
     except ValueError as exc:
@@ -41,5 +46,9 @@ def submit_task(
         return
 
     workspace = worker.settings.workspace_root / workspace_id
-    run_id, conv_id = worker.submit(task, workspace, conversation_id=conversation_id)
-    json_response(handler, 202, {"run_id": run_id, "conversation_id": conv_id, "status": "queued"})
+    try:
+        run_id, conv_id = worker.submit(task, workspace, conversation_id=conversation_id, mode=mode)
+    except ValueError as exc:
+        json_response(handler, 400, {"error": str(exc)})
+        return
+    json_response(handler, 202, {"run_id": run_id, "conversation_id": conv_id, "mode": mode, "status": "queued"})

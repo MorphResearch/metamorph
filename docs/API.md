@@ -1,6 +1,6 @@
 # Frontend and API boundary
 
-Yes, the finished system can be called from a frontend. The recommended shape is:
+The local system can be called from a frontend. The recommended shape is:
 
 ```text
 Browser UI → FastAPI backend → Metamorph runtime → model provider/tools
@@ -14,23 +14,24 @@ The frontend is a client, not the owner of agent state or credentials.
 
 ```text
 POST /v1/tasks
-  body: {"task": "...", "workspace_id": "...", "mode": "safe"}
-  returns: {"run_id": "...", "status": "queued"}
+  body: {"task": "...", "workspace_id": "default", "mode": "single|multiagent", "conversation_id": "..."}
+  returns: {"run_id": "...", "conversation_id": "...", "mode": "...", "status": "queued"}
+
+GET /v1/conversations
+  returns conversation summaries for the chat history sidebar
+
+GET /v1/conversations/{conversation_id}
+  returns all runs, messages, and persisted results in one conversation
 
 GET /v1/runs/{run_id}
   returns status, summary, metrics, and artifact links
 
 GET /v1/runs/{run_id}/events
-  returns structured tool/evaluation events
-
-POST /v1/runs/{run_id}/approve
-  approves a pending write, promotion, or other gated action
-
-POST /v1/candidates/{candidate_id}/promote
-  promotes an evaluated candidate after policy checks and human approval
+  returns structured tool/evaluation events; multiagent runs include architecture,
+  agent, lesson, and contribution events
 ```
 
-For the first UI, a simple task form, run status page, event timeline, artifact list, and candidate approval page are enough. Streaming can be added later with Server-Sent Events or WebSockets.
+The current UI supports continuous conversations, selecting single or multiagent mode, restoring history, and inspecting the run event timeline. Candidate approval and streaming can be added later.
 
 ## API rules
 

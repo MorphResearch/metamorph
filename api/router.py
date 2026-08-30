@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from . import __version__
 from .middleware import json_response, static_file
 from .workers import TaskWorker
-from .v1 import info, runs, tasks
+from .v1 import conversations, info, runs, tasks
 from config import Settings
 
 
@@ -45,6 +45,16 @@ class _RouteHandler(BaseHTTPRequestHandler):
         # /v1/runs
         if path == "/v1/runs":
             runs.list_runs(self, self.worker)
+            return
+
+        # /v1/conversations
+        if path == "/v1/conversations":
+            conversations.list_conversations(self, self.worker)
+            return
+
+        # /v1/conversations/{id}
+        if len(parts) == 4 and parts[1:3] == ["v1", "conversations"]:
+            conversations.get_conversation(self, self.worker, parts[3])
             return
 
         # /v1/runs/{id}/events

@@ -18,6 +18,9 @@ from state.events import EventLogger
 from llm.providers import PROVIDER_DEFAULTS, get_supported_providers
 from llm.client import build_client
 from state.store import RunStore
+from multiagent.evaluator import deterministic_report, propose_adjustment
+from multiagent.morphology import classify_task
+from multiagent.orchestrator import MultiAgentOrchestrator
 
 
 class ToolRegistryTests(unittest.TestCase):
@@ -56,6 +59,7 @@ class MemoryToolTests(unittest.TestCase):
 
 class ConfigTests(unittest.TestCase):
     def test_supported_providers(self):
+        self.assertIn("mock", get_supported_providers())
         for provider in ("openai", "deepseek", "minimax", "claude", "glm", "sensenova"):
             self.assertIn(provider, get_supported_providers())
             self.assertIn("model", PROVIDER_DEFAULTS[provider])
@@ -63,7 +67,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_settings_defaults(self):
         settings = Settings(data_dir=Path(".metamorph"))
-        self.assertEqual(settings.provider, "sensenova")
+        self.assertEqual(settings.provider, "deepseek")
 
 
 class StoreTests(unittest.TestCase):
@@ -104,6 +108,55 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(second_conv_id, conv_id)
         history = store.get_conversation(conv_id)
         self.assertEqual(len(history), 2)
+
+    def test_conversation_runs_include_results_in_order(self):
+        store = RunStore(Path(self._tmp))
+        first, conv_id = store.create("q1", Path("."))
+        second, _ = store.create("q2", Path("."), conversation_id=conv_id)
+        store.update(first, "completed", {"answer": "a1"})
+        store.update(second, "completed", {"answer": "a2"})
+        runs = store.list_conversation_runs(conv_id)
+        self.assertEqual([run["run_id"] for run in runs], [first, second])
+        self.assertEqual(runs[1]["result"]["answer"], "a2")
+
+
+class MultiAgentTests(unittest.TestCase):
+    def test_morphology_selects_coding_structure(self):
+        morphology = classify_task("分析这个 Python 项目并增加测试，然后检查错误")
+        self.assertEqual(morphology.task_kind, "coding")
+        self.assertTrue(morphology.needs_verification)
+
+    def test_contribution_report_and_adjustment(self):
+        from multiagent.models import AgentResult, AgentRole, ArchitecturePlan
+
+        plan = ArchitecturePlan("test", [], [
+            AgentRole("a", "A", "", ""),
+            AgentRole("b", "B", "", "", ["a"]),
+        ])
+        report = deterministic_report(plan, [
+            AgentResult("a", "A", "same answer"),
+            AgentResult("b", "B", "same answer", ["a"]),
+        ])
+        self.assertEqual(len(report.agents), 2)
+        adjustment = propose_adjustment(plan, report, "medium")
+        self.assertTrue(adjustment["requires_human_approval"])
+
+    def test_orchestrator_records_lessons_and_returns_evaluation(self):
+        with tempfile.TemporaryDirectory() as d:
+            events = []
+
+            class Logger:
+                def emit(self, event_type, **payload):
+                    events.append((event_type, payload))
+
+            def runner(prompt, agent_id):
+                return f"{agent_id} result with verification and useful evidence"
+
+            result = MultiAgentOrchestrator(runner, Path(d), Logger()).run("研究并比较两个方案")
+            self.assertEqual(result["mode"], "multiagent")
+            self.assertIn("contribution_report", result)
+            self.assertTrue((Path(d) / "multiagent_lessons.jsonl").exists())
+            self.assertIn("architecture.designed", [event[0] for event in events])
 
 
 class ExecutorLoopTests(unittest.TestCase):

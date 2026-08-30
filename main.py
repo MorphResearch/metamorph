@@ -12,9 +12,10 @@ from config import Settings
 from state.events import EventLogger
 from llm.client import PROVIDER_DEFAULTS, build_client
 from state.store import RunStore
+from multiagent.orchestrator import MultiAgentOrchestrator
 
 
-_PROVIDER_CHOICES = ["mock"] + list(PROVIDER_DEFAULTS.keys())
+_PROVIDER_CHOICES = sorted(PROVIDER_DEFAULTS.keys())
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--workspace", type=Path, default=Path("."))
     run.add_argument("--data-dir", type=Path, default=Path(".metamorph"))
     run.add_argument("--provider", choices=_PROVIDER_CHOICES, default=None)
+    run.add_argument("--mode", choices=("single", "multiagent"), default=None)
     run.add_argument("--model", default=None)
     run.add_argument("--base-url", default=None)
     run.add_argument("--api-key-env", default=None)
@@ -35,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     server.add_argument("--port", type=int, default=8787)
     server.add_argument("--data-dir", type=Path, default=Path(".metamorph"))
     server.add_argument("--provider", choices=_PROVIDER_CHOICES, default=None)
+    server.add_argument("--mode", choices=("single", "multiagent"), default=None)
     server.add_argument("--model", default=None)
     server.add_argument("--base-url", default=None)
     server.add_argument("--api-key-env", default=None)
@@ -54,10 +57,12 @@ def _apply_provider_overrides(args: argparse.Namespace, settings: Settings) -> S
         })
     if getattr(args, "model", None):
         settings = Settings(**{**settings.__dict__, "model_name": args.model})
-    if getattr(args, "base-url", None):
+    if getattr(args, "base_url", None):
         settings = Settings(**{**settings.__dict__, "base_url": args.base_url})
-    if getattr(args, "api-key-env", None):
+    if getattr(args, "api_key_env", None):
         settings = Settings(**{**settings.__dict__, "api_key_env": args.api_key_env})
+    if getattr(args, "mode", None):
+        settings = Settings(**{**settings.__dict__, "mode": args.mode})
     return settings
 
 
@@ -78,23 +83,62 @@ def main() -> None:
         api_key_env=settings.api_key_env,
     )
     store = RunStore(settings.data_dir)
-    run_id = store.create(args.task, args.workspace.expanduser().resolve())
+    run_id, conversation_id = store.create(args.task, args.workspace.expanduser().resolve())
     store.update(run_id, "running")
-    logger = EventLogger(settings.data_dir / "runs" / run_id)
+    run_dir = settings.data_dir / "runs" / run_id
+    logger = EventLogger(run_dir)
     try:
-        answer = run_agent(
-            client=client.client,
-            model_name=client.model_name,
-            messages=[{"role": "user", "content": args.task}],
-            logger=logger,
-            data_dir=settings.data_dir,
-            workspace_root=args.workspace.expanduser().resolve(),
-            max_turns=settings.max_steps,
-        )
-        result = {"run_id": run_id, "status": "completed", "answer": answer}
+        workspace = args.workspace.expanduser().resolve()
+        if settings.mode == "multiagent":
+            def run_role(prompt: str, agent_id: str) -> str:
+                return run_agent(
+                    client=client.client,
+                    model_name=client.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    logger=EventLogger(run_dir / "agents" / agent_id),
+                    data_dir=settings.data_dir,
+                    workspace_root=workspace,
+                    max_turns=settings.max_steps,
+                )
+
+            multi_result = MultiAgentOrchestrator(
+                runner=run_role,
+                data_dir=settings.data_dir,
+                logger=logger,
+            ).run(args.task, source_run=run_id)
+            answer = multi_result["answer"]
+        else:
+            multi_result = None
+            answer = run_agent(
+                client=client.client,
+                model_name=client.model_name,
+                messages=[{"role": "user", "content": args.task}],
+                logger=logger,
+                data_dir=settings.data_dir,
+                workspace_root=workspace,
+                max_turns=settings.max_steps,
+            )
+        result = {
+            "run_id": run_id,
+            "conversation_id": conversation_id,
+            "status": "completed",
+            "answer": answer,
+            "provider": client.provider,
+            "model": client.model_name,
+            "mode": settings.mode,
+        }
+        if multi_result is not None:
+            result.update({k: v for k, v in multi_result.items() if k != "answer"})
+        store.append_message(conversation_id, "user", args.task)
+        store.append_message(conversation_id, "assistant", answer)
+        logger.write_json("result.json", result)
         store.update(run_id, "completed", result)
     except Exception as exc:
         result = {"run_id": run_id, "status": "failed", "error": str(exc)}
         store.update(run_id, "failed", result)
         raise
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

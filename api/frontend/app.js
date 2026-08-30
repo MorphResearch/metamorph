@@ -1,6 +1,8 @@
 "use strict";
 
-// ---------- 基础工具 ----------
+// Metamorph chat workspace. The browser keeps only UI state; runs, messages,
+// events, and lessons remain persisted in the Python API.
+
 async function api(path, options) {
   const res = await fetch(path, options);
   const text = await res.text();
@@ -15,7 +17,6 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-// 把换行文本安全转为带 <br> 的 HTML
 function textToHtml(s) {
   return escapeHtml(s).replace(/\n/g, "<br>");
 }
@@ -24,18 +25,65 @@ function statusMeta(status) {
   switch (status) {
     case "queued": return { cls: "pill-off", label: "排队中" };
     case "running": return { cls: "pill-run", label: "运行中" };
-    case "passed": return { cls: "pill-ok", label: "已通过" };
+    case "passed":
+    case "completed": return { cls: "pill-ok", label: "已完成" };
     case "failed": return { cls: "pill-err", label: "失败" };
     default: return { cls: "pill-off", label: status || "未知" };
   }
 }
 
-// ---------- 全局状态 ----------
 const state = {
+  currentConversationId: null,
   currentRunId: null,
+  currentMessageEl: null,
   pollTimer: null,
+  polling: false,
   busy: false,
 };
+
+const messagesEl = document.getElementById("messages");
+const promptInput = document.getElementById("prompt-input");
+const sendBtn = document.getElementById("send-btn");
+
+function scrollBottom() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function removeWelcome() {
+  const welcome = messagesEl.querySelector(".welcome");
+  if (welcome) welcome.remove();
+}
+
+function welcomeHtml() {
+  return `<div class="welcome">` +
+    `<div class="welcome-logo">◈</div>` +
+    `<h2>我能帮你做什么？</h2>` +
+    `<p>描述一个任务，Agent 会规划、调用工具并执行。你可以连续追问，也可以展开查看思考、工具调用和多 Agent 评估。</p>` +
+    `<div class="suggestions">` +
+      `<button class="chip" data-q="检查当前工作区并总结文件结构">检查当前工作区并总结文件结构</button>` +
+      `<button class="chip" data-q="用 Python 写一个快速排序，并加测试用例">用 Python 写一个快速排序，并加测试用例</button>` +
+      `<button class="chip" data-q="读取 README.md 并用一句话概括这个项目">读取 README.md 并用一句话概括这个项目</button>` +
+    `</div></div>`;
+}
+
+function setChatHeader(title, subtitle) {
+  const titleEl = document.getElementById("chat-title");
+  const subtitleEl = document.getElementById("chat-subtitle");
+  if (titleEl) titleEl.textContent = title || "新建任务";
+  if (subtitleEl) subtitleEl.textContent = subtitle || "输入任务开始一次新的 Agent 运行";
+}
+
+function resetChat() {
+  stopPolling();
+  state.currentConversationId = null;
+  state.currentRunId = null;
+  state.currentMessageEl = null;
+  state.busy = false;
+  messagesEl.innerHTML = welcomeHtml();
+  setChatHeader("新建任务", "输入任务开始一次新的 Agent 运行");
+  setComposerDisabled(false);
+  bindChips();
+}
 
 // ---------- 连接信息 ----------
 async function loadInfo() {
@@ -50,6 +98,8 @@ async function loadInfo() {
     prov.textContent = `${data.provider}${model}`;
     prov.className = "pill pill-info";
     prov.title = `工作区根目录: ${data.workspace_root} · 允许写入: ${data.allow_write ? "是" : "否"}`;
+    const modeSelect = document.getElementById("agent-mode");
+    if (modeSelect && ["single", "multiagent"].includes(data.mode)) modeSelect.value = data.mode;
   } catch (e) {
     conn.textContent = "连接失败";
     conn.className = "pill pill-err";
@@ -57,22 +107,29 @@ async function loadInfo() {
   }
 }
 
-// ---------- 历史 ----------
+// ---------- 会话历史 ----------
 async function loadHistory() {
   const list = document.getElementById("history-list");
   try {
-    const { ok, data } = await api("/v1/runs");
-    if (!ok || !Array.isArray(data)) { list.innerHTML = '<li class="empty">加载失败</li>'; return; }
-    if (data.length === 0) { list.innerHTML = '<li class="empty">暂无运行记录</li>'; return; }
+    const { ok, data } = await api("/v1/conversations");
+    if (!ok || !Array.isArray(data)) {
+      list.innerHTML = '<li class="empty">加载失败</li>';
+      return;
+    }
+    if (data.length === 0) {
+      list.innerHTML = '<li class="empty">暂无对话记录</li>';
+      return;
+    }
     list.innerHTML = "";
-    data.forEach((run) => {
+    data.forEach((conversation) => {
       const li = document.createElement("li");
-      if (run.run_id === state.currentRunId) li.classList.add("active");
-      const meta = statusMeta(run.status);
+      if (conversation.conversation_id === state.currentConversationId) li.classList.add("active");
+      const preview = conversation.last_message || conversation.task || "(无描述)";
       li.innerHTML =
-        `<span class="h-task">${escapeHtml(run.task || "(无描述)")}</span>` +
-        `<span class="h-meta"><span class="h-id">${run.run_id}</span><span class="${meta.cls}">${meta.label}</span></span>`;
-      li.addEventListener("click", () => loadRunIntoChat(run.run_id));
+        `<span class="h-task">${escapeHtml(conversation.task || "(无描述)")}</span>` +
+        `<span class="h-preview">${escapeHtml(preview)}</span>` +
+        `<span class="h-meta"><span>${conversation.run_count || 0} 次任务</span><span class="h-id">${escapeHtml(conversation.conversation_id)}</span></span>`;
+      li.addEventListener("click", () => loadConversationIntoChat(conversation.conversation_id));
       list.appendChild(li);
     });
   } catch (e) {
@@ -81,29 +138,21 @@ async function loadHistory() {
 }
 
 // ---------- 消息渲染 ----------
-const messagesEl = document.getElementById("messages");
-
-function removeWelcome() {
-  const w = messagesEl.querySelector(".welcome");
-  if (w) w.remove();
-}
-
 function addUserMessage(text) {
   removeWelcome();
   const div = document.createElement("div");
   div.className = "msg user";
-  div.innerHTML = `<div class="bubble">${textToHtml(text)}</div>`;
+  div.innerHTML = `<div class="bubble"><div class="message-label">你</div>${textToHtml(text)}</div>`;
   messagesEl.appendChild(div);
   scrollBottom();
   return div;
 }
 
-// 新建一条 assistant 消息，返回其内部容器引用，便于后续逐步填充
 function addAssistantMessage(runId) {
   removeWelcome();
   const div = document.createElement("div");
   div.className = "msg assistant";
-  div.dataset.runId = runId;
+  if (runId) div.dataset.runId = runId;
   div.innerHTML =
     `<div class="avatar">◈</div>` +
     `<div class="bubble">` +
@@ -116,39 +165,41 @@ function addAssistantMessage(runId) {
   return div;
 }
 
-function scrollBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+function ensureThinkingPanel(msgEl) {
+  let panel = msgEl._thinkPanel;
+  if (panel && panel.isConnected) return panel;
+  panel = document.createElement("details");
+  panel.className = "thinking";
+  panel.open = true;
+  panel.innerHTML = `<summary>💭 思考过程</summary><div class="think-body"></div>`;
+  panel._buf = "";
+  msgEl.querySelector(".chain").appendChild(panel);
+  msgEl._thinkPanel = panel;
+  return panel;
 }
 
-// 构建一条"思考/动作"条目（对话式思考链）
-function buildChainItem(ev, runId) {
+function buildChainItem(ev, msgEl) {
   const type = ev.type || "event";
-  const time = (ev.timestamp || "").replace("T", " ").slice(0, 19);
 
-  // 0) DeepSeek 思考链（reasoning）—— 折叠面板，逐步累加
   if (type === "reasoning") {
-    const wrap = ensureThinkingPanel(runId);
+    const panel = ensureThinkingPanel(msgEl);
     if (ev.text) {
-      wrap._buf = (wrap._buf || "") + ev.text;
-      wrap.querySelector(".think-body").textContent = wrap._buf;
-      scrollBottom();
+      panel._buf += ev.text;
+      panel.querySelector(".think-body").textContent = panel._buf;
     }
     return null;
   }
 
-  // 1) LLM 的规划/思考（model.decision）
   if (type === "model.decision") {
     const wrap = document.createElement("div");
     wrap.className = "chain-item think";
-    const summary = ev.summary || "（模型未返回思考摘要）";
     wrap.innerHTML =
-      `<div class="ci-head"><span class="ci-dot"></span><span class="ci-title">思考 · 第 ${ev.step ?? "?"} 步</span>` +
+      `<div class="ci-head"><span class="ci-dot"></span><span class="ci-title">思考 · 第 ${escapeHtml(ev.step ?? "?")} 步</span>` +
       `<span class="ci-action">动作: ${escapeHtml(ev.action || "")}</span></div>` +
-      `<div class="ci-body">${textToHtml(summary)}</div>`;
+      `<div class="ci-body">${textToHtml(ev.summary || "（模型未返回思考摘要）")}</div>`;
     return wrap;
   }
 
-  // 2) 工具调用（tool.completed）
   if (type === "tool.completed") {
     const wrap = document.createElement("div");
     wrap.className = "chain-item tool";
@@ -162,70 +213,104 @@ function buildChainItem(ev, runId) {
       `<div class="ci-head ${ok ? "" : "err"}"><span class="ci-icon">🔧</span>` +
       `<span class="ci-title">调用工具: ${escapeHtml(ev.tool || "")}</span>` +
       `<span class="ci-status">${ok ? "成功" : "失败"}</span></div>` +
-      `<div class="ci-body">` +
-        `<div class="ci-args">参数: ${escapeHtml(argStr)}</div>` +
-        (shown ? `<div class="ci-out">${escapeHtml(shown)}</div>` : "") +
-      `</div>`;
+      `<div class="ci-body"><div class="ci-args">参数: ${escapeHtml(argStr)}</div>` +
+      (shown ? `<div class="ci-out">${escapeHtml(shown)}</div>` : "") + `</div>`;
     return wrap;
   }
 
-  // 3) 错误（model.error / observation 异常等）
+  if (type === "architecture.designed") {
+    const architecture = ev.architecture || {};
+    const roles = (architecture.roles || []).map(role => role.name).join("、");
+    const wrap = document.createElement("div");
+    wrap.className = "chain-item think";
+    wrap.innerHTML = `<div class="ci-head"><span class="ci-icon">🧭</span><span class="ci-title">架构设计</span></div>` +
+      `<div class="ci-body">${escapeHtml(architecture.strategy || "")} ${escapeHtml(roles)}</div>`;
+    return wrap;
+  }
+
+  if (type === "agent.completed") {
+    const agent = ev.agent || {};
+    const wrap = document.createElement("div");
+    wrap.className = "chain-item think";
+    wrap.innerHTML = `<div class="ci-head"><span class="ci-icon">👤</span><span class="ci-title">${escapeHtml(agent.role || agent.agent_id || "Agent")}</span></div>` +
+      `<div class="ci-body">${agent.success ? "已完成角色任务" : "角色执行失败"}</div>`;
+    return wrap;
+  }
+
+  if (type === "contribution.evaluated") {
+    const wrap = document.createElement("div");
+    wrap.className = "chain-item tool";
+    const count = ev.report && ev.report.agents ? ev.report.agents.length : 0;
+    wrap.innerHTML = `<div class="ci-head"><span class="ci-icon">📊</span><span class="ci-title">贡献评估</span></div>` +
+      `<div class="ci-body">已评估 ${count} 个 Agent 的边际贡献、纠错、独特性和冗余。</div>`;
+    return wrap;
+  }
+
+  if (type === "lesson.exchanged" || type === "architecture.adjusted") {
+    const wrap = document.createElement("div");
+    wrap.className = "chain-item think";
+    wrap.innerHTML = `<div class="ci-head"><span class="ci-icon">🔁</span><span class="ci-title">${type === "lesson.exchanged" ? "Lesson 已记录" : "下一轮架构建议"}</span></div>` +
+      `<div class="ci-body">结果将用于后续任务的架构设计。</div>`;
+    return wrap;
+  }
+
   if (type.includes("error")) {
     const wrap = document.createElement("div");
     wrap.className = "chain-item tool err";
-    wrap.innerHTML =
-      `<div class="ci-head err"><span class="ci-icon">✕</span>` +
-      `<span class="ci-title">${escapeHtml(type.replace("run.", ""))}</span></div>` +
+    wrap.innerHTML = `<div class="ci-head err"><span class="ci-icon">✕</span><span class="ci-title">${escapeHtml(type.replace("run.", ""))}</span></div>` +
       `<div class="ci-body">${escapeHtml(ev.error || "出错了")}</div>`;
     return wrap;
   }
-
-  // 其它事件（run.started 等）折叠忽略，避免噪音
   return null;
 }
 
-// 每个 run 一个可折叠的"思考过程"面板（对齐 scilink-agent 的思考折叠）
-function ensureThinkingPanel(runId) {
-  const msg = document.querySelector(`.msg.assistant[data-run-id="${runId}"]`);
-  if (!msg) return { _buf: "", querySelector: () => ({ textContent: "" }) };
-  let panel = msg._thinkPanel;
-  if (!panel) {
-    panel = document.createElement("details");
-    panel.className = "thinking";
-    panel.open = true;
-    panel.innerHTML =
-      `<summary>💭 思考过程</summary>` +
-      `<div class="think-body"></div>`;
-    msg.querySelector(".chain").appendChild(panel);
-    panel._buf = "";
-    msg._thinkPanel = panel;
-    scrollBottom();
-  }
-  return panel;
-}
-
-// 把 run 的事件渲染进某条 assistant 消息（思考链）
 function renderEventsInto(msgEl, events) {
   const chainEl = msgEl.querySelector(".chain");
   chainEl.innerHTML = "";
-  const runId = msgEl.dataset.runId;
+  msgEl._thinkPanel = null;
   let hasContent = false;
   events.forEach((ev) => {
-    const item = buildChainItem(ev, runId);
+    const item = buildChainItem(ev, msgEl);
     if (item) { chainEl.appendChild(item); hasContent = true; }
   });
-  // 思考过程面板（reasoning 事件）算作内容
-  if (msgEl._thinkPanel && msgEl._thinkPanel.querySelector(".think-body").textContent) {
-    hasContent = true;
-  }
-  if (!hasContent) {
-    chainEl.innerHTML = `<div class="chain-empty">正在连接模型…</div>`;
-  }
+  const panel = msgEl._thinkPanel;
+  if (panel && panel.querySelector(".think-body").textContent) hasContent = true;
+  if (!hasContent) chainEl.innerHTML = `<div class="chain-empty">正在连接模型…</div>`;
+}
+
+function renderRunSummary(result) {
+  if (!result || result.mode !== "multiagent") return "";
+  const morphology = result.morphology || {};
+  const architecture = result.architecture || {};
+  const agents = result.agents || [];
+  const report = result.contribution_report || {};
+  const adjustment = result.architecture_adjustment || {};
+  const operations = adjustment.operations || [];
+  const roleNames = (architecture.roles || []).map(role => role.name).join("、") || "未返回";
+  const contributionRows = (report.agents || []).map(item =>
+    `<div class="metric-row"><span>${escapeHtml(item.agent_id)}</span><span>边际 ${item.marginal_contribution ?? "—"} · 纠错 ${item.error_correction ?? "—"} · 冗余 ${item.redundancy ?? "—"}</span></div>`
+  ).join("");
+  const operationText = operations.map(item => {
+    const target = item.agents ? item.agents.join(" + ") : (item.agent_id || item.role || "架构");
+    return `${item.action}: ${target}（${item.reason || ""}）`;
+  }).join("；") || "保持当前架构";
+  return `<details class="run-summary"><summary>🧬 查看自适应多 Agent 报告</summary>` +
+    `<div class="summary-grid">` +
+      `<div><span class="summary-label">任务形态</span><strong>${escapeHtml(morphology.task_kind || "general")}</strong></div>` +
+      `<div><span class="summary-label">复杂度</span><strong>${escapeHtml(morphology.complexity || "—")}</strong></div>` +
+      `<div><span class="summary-label">执行角色</span><strong>${agents.length} 个</strong></div>` +
+      `<div><span class="summary-label">架构策略</span><strong>${escapeHtml(architecture.strategy || "—")}</strong></div>` +
+    `</div>` +
+    `<div class="summary-section"><span class="summary-label">角色分工</span><div>${escapeHtml(roleNames)}</div></div>` +
+    (contributionRows ? `<div class="summary-section"><span class="summary-label">因果贡献代理指标</span>${contributionRows}</div>` : "") +
+    `<div class="summary-section"><span class="summary-label">下一轮建议</span><div>${escapeHtml(operationText)}</div></div>` +
+    `<div class="summary-note">建议状态：${escapeHtml(adjustment.requires_human_approval ? "等待人工确认" : "可应用")}</div>` +
+  `</details>`;
 }
 
 function setStatusText(msgEl, text) {
-  const s = msgEl.querySelector(".status-text");
-  if (s) s.textContent = text;
+  const status = msgEl.querySelector(".status-text");
+  if (status) status.textContent = text;
 }
 
 function finishMessage(msgEl, run) {
@@ -234,123 +319,160 @@ function finishMessage(msgEl, run) {
   const meta = statusMeta(run.status);
   const spinner = msgEl.querySelector(".spinner");
   if (spinner) spinner.remove();
-
   const result = run.result || {};
-  // 最终回答作为 AI 的正式回复（去掉评分卡，呈现纯对话体验）
+
   if (result.answer) {
     finalEl.hidden = false;
-    finalEl.innerHTML = `<div class="answer-body">${textToHtml(result.answer)}</div>`;
+    finalEl.innerHTML = `<div class="answer-body">${textToHtml(result.answer)}</div>` + renderRunSummary(result);
   } else if (run.status === "failed") {
     finalEl.hidden = false;
-    finalEl.innerHTML = `<div class="answer-body">任务未成功完成（失败）。</div>`;
+    finalEl.innerHTML = `<div class="answer-body">任务未成功完成（失败）：${escapeHtml(result.error || run.result?.error || "未知错误")}</div>`;
   }
-
   if (statusLine) {
     statusLine.innerHTML = `<span class="pill ${meta.cls}" style="font-size:11px">${meta.label}</span>` +
       (result.steps != null ? ` <span class="mini">${result.steps} 步</span>` : "") +
       (result.duration_seconds != null ? ` <span class="mini">${result.duration_seconds}s</span>` : "") +
-      (result.model ? ` <span class="mini">${escapeHtml(result.model)}</span>` : "");
+      (result.model ? ` <span class="mini">${escapeHtml(result.model)}</span>` : "") +
+      (result.mode === "multiagent" ? ` <span class="mini">自适应多 Agent</span>` : "");
+  }
+  if (run.run_id === state.currentRunId) {
+    state.busy = false;
+    setComposerDisabled(false);
+    setChatHeader(document.getElementById("chat-title")?.textContent || "当前对话", "任务已完成，可以继续追问");
   }
 }
 
-// ---------- 拉取并刷新一条运行 ----------
-async function refreshRun(msgEl) {
-  const { ok, data } = await api(`/v1/runs/${state.currentRunId}`);
+async function fetchEvents(runId) {
+  const response = await api(`/v1/runs/${runId}/events`);
+  return response.ok && Array.isArray(response.data) ? response.data : [];
+}
+
+async function refreshRun(msgEl, runId = state.currentRunId) {
+  if (!runId || !msgEl) return;
+  const { ok, data } = await api(`/v1/runs/${runId}`);
   if (!ok || !data) return;
-  const eventsRes = await api(`/v1/runs/${state.currentRunId}/events`);
-  const events = eventsRes.ok && Array.isArray(eventsRes.data) ? eventsRes.data : [];
-  renderEventsInto(msgEl, events);
+  renderEventsInto(msgEl, await fetchEvents(runId));
+  const status = data.status;
+  if (status === "queued") setStatusText(msgEl, "排队中…");
+  else if (status === "running") setStatusText(msgEl, "调用 LLM 中…");
+  else setStatusText(msgEl, statusMeta(status).label);
 
-  const st = data.status;
-  if (st === "queued") setStatusText(msgEl, "排队中…");
-  else if (st === "running") setStatusText(msgEl, "调用 LLM 中…");
-  else setStatusText(msgEl, statusMeta(st).label);
-
-  if (st === "passed" || st === "failed") {
-    stopPolling();
+  if (["completed", "passed", "failed"].includes(status)) {
+    if (runId === state.currentRunId) stopPolling();
     finishMessage(msgEl, data);
     await loadHistory();
   }
   scrollBottom();
 }
 
-// ---------- 提交任务（进入对话） ----------
+// ---------- 提交任务 ----------
 async function submitTask(taskText) {
-  if (state.busy) return;
+  if (state.busy || !taskText) return;
   const workspaceId = document.getElementById("workspace-input").value.trim() || "default";
-  if (!taskText) return;
-
+  const mode = document.getElementById("agent-mode").value;
   state.busy = true;
   setComposerDisabled(true);
   addUserMessage(taskText);
+  setChatHeader(taskText, `${mode === "multiagent" ? "自适应多 Agent" : "单 Agent"} · 正在执行`);
 
   try {
     const { ok, data } = await api("/v1/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task: taskText, workspace_id: workspaceId }),
+      body: JSON.stringify({
+        task: taskText,
+        workspace_id: workspaceId,
+        mode,
+        conversation_id: state.currentConversationId,
+      }),
     });
     if (!ok) throw new Error(data && data.error ? data.error : "提交失败");
-
+    state.currentConversationId = data.conversation_id;
     state.currentRunId = data.run_id;
     const msgEl = addAssistantMessage(data.run_id);
+    state.currentMessageEl = msgEl;
     await loadHistory();
-    await refreshRun(msgEl);
-    startPolling(msgEl);
+    await refreshRun(msgEl, data.run_id);
+    startPolling(msgEl, data.run_id);
   } catch (e) {
-    const m = addAssistantMessage(null);
-    m.querySelector(".chain").innerHTML = `<div class="chain-item tool err"><div class="ci-head err"><span class="ci-icon">✕</span><span class="ci-title">提交失败</span></div><div class="ci-body">${escapeHtml(e.message)}</div></div>`;
-    const sp = m.querySelector(".spinner"); if (sp) sp.remove();
-    setStatusText(m, "失败");
-  } finally {
     state.busy = false;
     setComposerDisabled(false);
+    const message = addAssistantMessage(null);
+    message.querySelector(".chain").innerHTML = `<div class="chain-item tool err"><div class="ci-head err"><span class="ci-icon">✕</span><span class="ci-title">提交失败</span></div><div class="ci-body">${escapeHtml(e.message)}</div></div>`;
+    const spinner = message.querySelector(".spinner");
+    if (spinner) spinner.remove();
+    setStatusText(message, "失败");
   }
 }
 
-// ---------- 查看历史运行 ----------
-async function loadRunIntoChat(runId) {
+// ---------- 加载完整会话 ----------
+async function loadConversationIntoChat(conversationId) {
   stopPolling();
-  state.currentRunId = runId;
-  const { ok, data } = await api(`/v1/runs/${runId}`);
+  state.currentConversationId = conversationId;
+  state.currentRunId = null;
+  state.currentMessageEl = null;
+  state.busy = false;
+  setComposerDisabled(false);
+  const { ok, data } = await api(`/v1/conversations/${conversationId}`);
   if (!ok || !data) return;
-  removeWelcome();
-  const msgEl = addAssistantMessage(runId);
-  addUserMessage(data.task || "(无描述)");
-  msgEl.remove(); // 顺序：先放 user，再放 assistant
-  const realEl = addAssistantMessage(runId);
-  await refreshRun(realEl);
+
+  messagesEl.innerHTML = "";
+  const runs = data.runs || [];
+  setChatHeader(runs[0]?.task || "历史对话", `${runs.length} 次任务 · 可继续追问`);
+  let activeRun = null;
+  let activeMessage = null;
+  for (const run of runs) {
+    addUserMessage(run.task || "(无描述)");
+    const message = addAssistantMessage(run.run_id);
+    renderEventsInto(message, await fetchEvents(run.run_id));
+    if (["completed", "passed", "failed"].includes(run.status)) {
+      finishMessage(message, run);
+    } else {
+      activeRun = run;
+      activeMessage = message;
+    }
+  }
   await loadHistory();
-  if (data.status === "running" || data.status === "queued") startPolling(realEl);
+  if (activeRun && activeMessage) {
+    state.currentRunId = activeRun.run_id;
+    state.currentMessageEl = activeMessage;
+    state.busy = true;
+    setComposerDisabled(true);
+    startPolling(activeMessage, activeRun.run_id);
+  }
+  scrollBottom();
 }
 
 // ---------- 轮询 ----------
-function startPolling(msgEl) {
+function startPolling(msgEl, runId) {
   stopPolling();
-  state.pollTimer = setInterval(() => {
-    if (!state.currentRunId) return;
-    refreshRun(msgEl);
+  state.currentRunId = runId;
+  state.currentMessageEl = msgEl;
+  state.pollTimer = setInterval(async () => {
+    if (!state.currentRunId || state.currentRunId !== runId || state.polling) return;
+    state.polling = true;
+    try { await refreshRun(msgEl, runId); } finally { state.polling = false; }
   }, 1500);
 }
+
 function stopPolling() {
   if (state.pollTimer) clearInterval(state.pollTimer);
   state.pollTimer = null;
+  state.polling = false;
 }
 
 // ---------- 输入框交互 ----------
 function setComposerDisabled(disabled) {
-  document.getElementById("send-btn").disabled = disabled;
-  document.getElementById("prompt-input").disabled = disabled;
+  sendBtn.disabled = disabled;
+  promptInput.disabled = disabled;
+  document.getElementById("agent-mode").disabled = disabled;
+  document.getElementById("workspace-input").disabled = disabled;
 }
-
-const promptInput = document.getElementById("prompt-input");
-const sendBtn = document.getElementById("send-btn");
 
 function autoGrow() {
   promptInput.style.height = "auto";
   promptInput.style.height = Math.min(promptInput.scrollHeight, 160) + "px";
 }
-promptInput.addEventListener("input", autoGrow);
 
 function send() {
   const text = promptInput.value.trim();
@@ -361,31 +483,16 @@ function send() {
 }
 
 sendBtn.addEventListener("click", send);
-promptInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
+promptInput.addEventListener("input", autoGrow);
+promptInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
     send();
   }
 });
 
-document.getElementById("new-chat").addEventListener("click", () => {
-  stopPolling();
-  state.currentRunId = null;
-  messagesEl.innerHTML =
-    `<div class="welcome">` +
-      `<div class="welcome-logo">◈</div>` +
-      `<h2>我能帮你做什么？</h2>` +
-      `<p>描述一个任务，Agent 会规划、调用工具并执行，最后给出结果。你可以随时查看它的思考与执行过程。</p>` +
-      `<div class="suggestions">` +
-        `<button class="chip" data-q="检查当前工作区并总结文件结构">检查当前工作区并总结文件结构</button>` +
-        `<button class="chip" data-q="用 Python 写一个快速排序，并加测试用例">用 Python 写一个快速排序，并加测试用例</button>` +
-        `<button class="chip" data-q="读取 README.md 并用一句话概括这个项目">读取 README.md 并用一句话概括这个项目</button>` +
-      `</div>` +
-    `</div>`;
-  bindChips();
-});
+document.getElementById("new-chat").addEventListener("click", resetChat);
 
-document.querySelectorAll(".chip").forEach(bindChip);
 function bindChip(chip) {
   chip.addEventListener("click", () => {
     promptInput.value = chip.dataset.q;
@@ -393,12 +500,14 @@ function bindChip(chip) {
     send();
   });
 }
+
 function bindChips() {
   document.querySelectorAll(".chip").forEach(bindChip);
 }
 
 // ---------- 启动 ----------
 (async function init() {
+  bindChips();
   await loadInfo();
   await loadHistory();
 })();

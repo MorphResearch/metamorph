@@ -4,7 +4,7 @@
 
 Metamorph 将模型适配器与 Agent runtime 分离。runtime 只向供应商 adapter 请求一个经过验证的 `Decision`，不需要知道结果来自 OpenAI、DeepSeek、MiniMax、Claude 还是 GLM。
 
-在 v0.1 中，供应商切换是**进程级别**的：启动 CLI 或 API server 前选择一个供应商。每个任务分别路由不同模型属于后续功能，等 benchmark 和成本统计稳定后再加入。
+在 v0.1 中，供应商切换是**进程级别**的：启动 CLI 或 API server 前选择一个供应商，默认使用 DeepSeek。每个任务分别路由不同模型属于后续功能，等 benchmark 和成本统计稳定后再加入。
 
 ## 当前支持的供应商
 
@@ -32,7 +32,7 @@ Metamorph 将模型适配器与 Agent runtime 分离。runtime 只向供应商 a
 Mock 模式不需要第三方依赖：
 
 ```bash
-python3 -m metamorph.cli run "inspect this workspace" --provider mock
+python3 main.py run "inspect this workspace" --provider mock
 ```
 
 OpenAI-compatible 供应商使用 OpenAI Python SDK：
@@ -52,7 +52,7 @@ pip install -e '.[anthropic]'
 通过 `--provider` 选择供应商：
 
 ```bash
-python3 -m metamorph.cli run "inspect this workspace" \
+python3 main.py run "inspect this workspace" \
   --provider deepseek \
   --model deepseek-v4-pro \
   --workspace .
@@ -61,10 +61,10 @@ python3 -m metamorph.cli run "inspect this workspace" \
 其他例子：
 
 ```bash
-python3 -m metamorph.cli run "inspect this workspace" --provider minimax
-python3 -m metamorph.cli run "inspect this workspace" --provider claude
-python3 -m metamorph.cli run "inspect this workspace" --provider glm
-python3 -m metamorph.cli run "inspect this workspace" --provider openai
+python3 main.py run "inspect this workspace" --provider minimax
+python3 main.py run "inspect this workspace" --provider claude
+python3 main.py run "inspect this workspace" --provider glm
+python3 main.py run "inspect this workspace" --provider openai
 ```
 
 旧版本的 `--model-mode mock` 和 `--model-mode openai` 仍然保留，作为兼容别名。
@@ -78,7 +78,7 @@ export METAMORPH_PROVIDER=glm
 export METAMORPH_MODEL=glm-5.1
 export ZAI_API_KEY="replace-me"
 
-python3 -m metamorph.cli serve
+python3 main.py serve
 ```
 
 其他例子：
@@ -133,7 +133,7 @@ runtime 会在执行前验证 action。v0.1 暂时没有使用每个供应商原
 
 ## 如何增加新供应商
 
-如果新供应商兼容 OpenAI API，只需要在 `metamorph/model.py` 的 `PROVIDER_DEFAULTS` 中加入 endpoint、key 变量和默认模型。如果它使用不同协议，则实现一个满足以下接口的新 adapter：
+如果新供应商兼容 OpenAI API，只需要在 `llm/providers.py` 的 `PROVIDER_DEFAULTS` 中加入 endpoint、key 变量和默认模型。如果它使用不同协议，则实现一个满足以下接口的新 adapter：
 
 ```python
 class ModelAdapter(Protocol):

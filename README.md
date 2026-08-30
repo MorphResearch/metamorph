@@ -5,12 +5,60 @@
 
 ## 架构
 
-```text
-用户输入 → HTTP API → RunService → agent.executor（agent→tools 循环）
-                                  ├─ 思考链提取（reasoning_content）
-                                  ├─ 工具调用（联网检索 / 文档读取 / 记忆）
-                                  └─ 事件日志（EventLogger，前端思考折叠 + 工具卡片）
+Metamorph 当前是一个本地 API-first Agent 系统：浏览器只调用本地后端，模型 API Key 始终留在后端进程中。任务可以选择单 Agent 或基于任务形态自动设计的多 Agent 流程。
+
+```mermaid
+flowchart TB
+    USER[用户] --> UI[Web 前端<br/>连续对话 / 提交任务 / 历史会话]
+    UI --> API[本地 HTTP API<br/>127.0.0.1:8787]
+    API --> ROUTER[API Router<br/>info / tasks / conversations / runs]
+    ROUTER --> WORKER[TaskWorker<br/>后台线程执行]
+    WORKER --> MODE{任务模式}
+
+    MODE --> SINGLE[Single Agent]
+    SINGLE --> LOOP[Agent Loop<br/>模型决策 → 工具 → 观察]
+    LOOP --> TOOLS[Tool Registry]
+
+    MODE --> MULTI[Adaptive Multi-Agent]
+    MULTI --> ORCH[MultiAgentOrchestrator]
+    ORCH --> MORPH[Task Morphology<br/>任务类型 / 复杂度 / 可分解性 / 工具密度]
+    MORPH --> PLAN[Architecture Planner<br/>角色与依赖设计]
+    PLAN --> ROLES[多个角色执行<br/>每个角色复用 Agent Loop]
+    ROLES --> EVAL[Contribution Evaluator<br/>贡献 / 纠错 / 独特性 / 冗余]
+    EVAL --> ADJUST[下一轮架构建议<br/>默认需要人工批准]
+    ORCH --> LESSON[Lesson Store<br/>用于后续任务规划]
+    LESSON --> PLAN
+
+    LOOP --> LLM[LLM Client]
+    ROLES --> LLM
+    LLM --> PROVIDERS[DeepSeek / OpenAI / MiniMax<br/>GLM / Claude / Sensenova / Mock]
+    TOOLS --> TOOLSET[Web Search / Web Fetch<br/>Document / Memory]
+
+    WORKER --> DB[(SQLite<br/>runs.db)]
+    WORKER --> EVENTS[(事件日志<br/>events.jsonl)]
+    WORKER --> ARTIFACTS[(运行结果<br/>result.json)]
+    LESSON --> LESSONDB[(multiagent_lessons.jsonl)]
+    WORKER --> WS[受控 workspace<br/>allow_write 控制写入]
+
+    DB --> UI
+    EVENTS --> UI
+    ARTIFACTS --> UI
 ```
+
+### 一次任务的执行路径
+
+```text
+用户输入任务
+  → POST /v1/tasks
+  → TaskWorker 创建 run 和 conversation
+  → 选择 Single Agent 或 Adaptive Multi-Agent
+  → 调用模型、工具和受控 workspace
+  → 写入 SQLite、事件日志和运行结果
+  → 前端轮询状态并展示最终回答
+  → 多 Agent 额外执行贡献评估、Lesson 记录和下一轮架构建议
+```
+
+当前的架构建议只保存为 candidate，不会自动改写代码、权限或工具。贡献评估目前是可解释的代理指标；后续应通过移除角色、合并角色和屏蔽消息等受控干预，测量真实的因果边际贡献。
 
 ### 代码分层
 
@@ -25,9 +73,10 @@
 | ├─ `document.py` | `read_document` |
 | └─ `memory.py` | `update_user_memory`（本地 JSONL 跨会话记忆） |
 | `state/` | 运行状态：`events.py` 事件日志 + `store.py` SQLite 运行记录（history 持久化） |
-| `api/` | HTTP 接口层：`routes.py` 路由 + `service.py` 编排 + `frontend/` 前端 |
+| `api/` | HTTP 接口层：路由、worker 和 `frontend/` 前端 |
 | `config/` | 应用配置（`settings.py` 定义 `Settings`） |
-| `cli/` | 命令行入口（`serve` / `run`） |
+| `multiagent/` | 任务形态、角色架构、lesson、贡献评估和调整建议 |
+| `main.py` | 命令行入口（`serve` / `run`） |
 
 ## 快速开始
 
@@ -35,10 +84,10 @@
 pip install -e ".[openai,tools]"      # 核心 + 可选工具依赖
 
 # 设置凭证（仅当前终端会话，不落盘）
-export SENSENOVA_API_KEY="sk-xxx"      # Windows PowerShell: $env:SENSENOVA_API_KEY="sk-xxx"
+export DEEPSEEK_API_KEY="sk-xxx"       # Windows PowerShell: $env:DEEPSEEK_API_KEY="sk-xxx"
 
-# 启动本地服务
-metamorph serve --provider sensenova --port 8787
+# 启动本地服务（默认 DeepSeek + 单 Agent）
+metamorph serve --port 8787
 ```
 
 打开 http://127.0.0.1:8787 即可在页面中与 agent 对话，实时看到：
@@ -47,19 +96,19 @@ metamorph serve --provider sensenova --port 8787
 ### 命令行直接运行
 
 ```bash
-metamorph run "帮我查一下今天上海的天气" --provider sensenova
+metamorph run "帮我查一下今天上海的天气"
 ```
 
 ## 支持的模型供应商
 
 `openai` / `deepseek` / `minimax` / `glm` / `claude` / `sensenova`
-（默认 `sensenova`，模型 `deepseek-v4-flash`）。
+（默认 `deepseek`，模型 `deepseek-v4-pro`）。
 
 切换供应商无需改动代码：
 
 ```bash
-python -m metamorph.cli serve --provider deepseek
-python -m metamorph.cli serve --provider openai
+python main.py serve --provider deepseek
+python main.py serve --provider openai --mode multiagent
 ```
 
 配置示例见 `.env.example`。
@@ -73,6 +122,7 @@ pytest
 ## 设计原则
 
 1. 架构对齐 scilink-agent 的分层，但业务逻辑通用，无垂直领域硬编码。
-2. 模型接入与 agent 逻辑解耦：新增 provider 只需在 `llm/client.py` 的 `PROVIDER_DEFAULTS` 登记。
-3. 工具即插即用：在 `agent/tools/` 下用 `register()` 声明，自动进入 schema 与 UI。
+2. 模型接入与 agent 逻辑解耦：新增 provider 只需在 `llm/providers.py` 的 `PROVIDER_DEFAULTS` 登记。
+3. 工具即插即用：在 `tools/` 下用 `register()` 声明，自动进入 schema 与 UI。
 4. 所有运行证据（事件、结果）落盘可回溯；刷新页面可恢复完整思考链与工具轨迹。
+5. 多 Agent 的架构建议只作为 candidate 保存，默认不自动修改代码、权限或工具。

@@ -69,6 +69,7 @@ body {
 .history-list li:hover { border-color: var(--accent); }
 .history-list li.active { border-color: var(--accent); }
 .history-list .h-task { font-size: 12.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-list .h-preview { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; margin-top: 2px; }
 .history-list .h-meta { font-size: 10.5px; color: var(--muted); margin-top: 3px; display: flex; justify-content: space-between; gap: 6px; }
 .history-list .h-id { font-family: monospace; }
 .history-list .empty { cursor: default; color: var(--muted); text-align: center; border: none; background: transparent; }
@@ -88,6 +89,13 @@ body {
 
 /* ---------- 聊天区 ---------- */
 .chat { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
+.chat-header {
+  min-height: 66px; padding: 12px 24px; border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,.88); display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.chat-header h2 { margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-header p { margin: 2px 0 0; color: var(--muted); font-size: 11.5px; }
+.chat-hint { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .messages { flex: 1; overflow-y: auto; padding: 24px; }
 .messages::-webkit-scrollbar { width: 8px; }
 .messages::-webkit-scrollbar-thumb { background: #d7dde6; border-radius: 8px; }
@@ -125,6 +133,8 @@ body {
   border-bottom-right-radius: 4px;
 }
 .msg.assistant .bubble { border-bottom-left-radius: 4px; width: 100%; }
+.message-label { font-size: 11px; opacity: .72; margin-bottom: 3px; }
+.msg.user .message-label { text-align: right; }
 
 .avatar {
   width: 34px; height: 34px; flex: 0 0 34px;
@@ -200,6 +210,17 @@ body {
 .final-answer { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px; }
 .answer-body { font-size: 14.5px; white-space: pre-wrap; word-break: break-word; }
 
+/* 多 Agent 结果摘要 */
+.run-summary { margin-top: 13px; border: 1px solid #dbe4ff; border-radius: 10px; background: #f7f9ff; overflow: hidden; }
+.run-summary > summary { cursor: pointer; padding: 8px 11px; color: #3a4a7a; font-size: 12.5px; font-weight: 600; user-select: none; }
+.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0 11px 10px; }
+.summary-grid > div { background: #fff; border: 1px solid #e7ecfb; border-radius: 8px; padding: 7px 8px; min-width: 0; }
+.summary-grid strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.summary-label { display: block; color: var(--muted); font-size: 10.5px; margin-bottom: 2px; }
+.summary-section { border-top: 1px solid #e3e9fa; padding: 8px 11px; font-size: 12px; color: #364050; }
+.metric-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; }
+.summary-note { border-top: 1px dashed #dbe4ff; color: var(--muted); padding: 7px 11px; font-size: 11px; }
+
 /* ---------- 输入区 ---------- */
 .composer {
   border-top: 1px solid var(--border);
@@ -210,7 +231,7 @@ body {
 .composer-row.main-row { margin-top: 8px; }
 .ws-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .workspace-input {
-  width: 110px; background: var(--panel-2); border: 1px solid var(--border);
+  width: 125px; background: var(--panel-2); border: 1px solid var(--border);
   color: var(--text); border-radius: 8px; padding: 6px 9px; font-size: 12.5px;
 }
 .workspace-input:focus { outline: none; border-color: var(--accent); }
@@ -233,4 +254,11 @@ body {
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
+  .chat-header { padding: 10px 14px; }
+  .chat-hint { display: none; }
+  .messages { padding: 16px 12px; }
+  .composer { padding: 10px 12px 12px; }
+  .composer-row { gap: 6px; }
+  .workspace-input { width: 110px; }
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

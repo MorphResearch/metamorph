@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any
+from types import SimpleNamespace
 
 from .providers import PROVIDER_DEFAULTS, get_supported_providers
 
@@ -35,13 +36,6 @@ def build_client(
     Raises RuntimeError if the optional ``openai`` dependency is missing or the
     required API key is not set in the environment.
     """
-    try:
-        from openai import OpenAI
-    except ImportError as exc:  # noqa: BLE001
-        raise RuntimeError(
-            "LLM providers require the optional dependency: pip install -e '.[openai]'"
-        ) from exc
-
     if provider not in PROVIDER_DEFAULTS:
         raise ValueError(
             "Unknown provider: %r; choose from %s"
@@ -52,6 +46,16 @@ def build_client(
     selected_model = model_name or defaults["model"]
     selected_key_env = api_key_env or defaults["api_key_env"]
     selected_base_url = base_url or defaults.get("base_url")
+
+    if provider == "mock":
+        return LLMClient(provider="mock", model_name=selected_model, client=_MockClient())
+
+    try:
+        from openai import OpenAI
+    except ImportError as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "LLM providers require the optional dependency: pip install -e '.[openai]'"
+        ) from exc
 
     api_key = os.getenv(selected_key_env)
     if not api_key:
@@ -73,3 +77,19 @@ def build_client(
         client=client,
         base_url=selected_base_url,
     )
+
+
+class _MockCompletions:
+    def create(self, **kwargs: Any) -> Any:
+        if kwargs.get("stream"):
+            raise TypeError("mock client uses the non-streaming fallback")
+        messages = kwargs.get("messages") or []
+        user_messages = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        task = str(user_messages[-1] if user_messages else "")
+        message = SimpleNamespace(content=f"[mock] 已完成任务：{task[:240]}", tool_calls=[])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+class _MockClient:
+    def __init__(self) -> None:
+        self.chat = SimpleNamespace(completions=_MockCompletions())

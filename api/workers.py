@@ -16,6 +16,7 @@ from graphs.agent import run_agent as _run_agent
 from llm.client import build_client
 from state.events import EventLogger
 from state.store import RunStore
+from multiagent.orchestrator import MultiAgentOrchestrator
 
 
 class TaskWorker:
@@ -42,6 +43,7 @@ class TaskWorker:
         task: str,
         workspace: Path,
         conversation_id: str | None = None,
+        mode: str | None = None,
     ) -> tuple[str, str]:
         """Register a new run and start a background worker thread.
 
@@ -50,11 +52,14 @@ class TaskWorker:
         dialogue context.  Returns ``(run_id, conversation_id)``.
         """
         resolved = workspace.expanduser().resolve()
+        selected_mode = mode or self.settings.mode
+        if selected_mode not in {"single", "multiagent"}:
+            raise ValueError("mode must be single or multiagent")
         run_id, conv_id = self.store.create(task, resolved, conversation_id=conversation_id)
         history = self.store.get_conversation(conv_id) if conv_id else []
         thread = threading.Thread(
             target=self._run,
-            args=(run_id, conv_id, task, resolved, history),
+            args=(run_id, conv_id, task, resolved, history, selected_mode),
             daemon=True,
             name=f"worker-{run_id}",
         )
@@ -70,21 +75,43 @@ class TaskWorker:
         task: str,
         workspace: Path,
         history: list[dict[str, str]],
+        mode: str,
     ) -> None:
         run_dir = self.store.runs_dir / run_id
         logger = EventLogger(run_dir)
         self.store.update(run_id, "running")
         try:
-            answer = _run_agent(
-                client=self.client.client,
-                model_name=self.client.model_name,
-                messages=[{"role": "user", "content": task}],
-                logger=logger,
-                data_dir=self.settings.data_dir,
-                workspace_root=workspace,
-                max_turns=self.settings.max_steps,
-                history=history,
-            )
+            if mode == "multiagent":
+                def run_role(prompt: str, agent_id: str) -> str:
+                    role_logger = EventLogger(run_dir / "agents" / agent_id)
+                    return _run_agent(
+                        client=self.client.client,
+                        model_name=self.client.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        logger=role_logger,
+                        data_dir=self.settings.data_dir,
+                        workspace_root=workspace,
+                        max_turns=self.settings.max_steps,
+                    )
+
+                multi_result = MultiAgentOrchestrator(
+                    runner=run_role,
+                    data_dir=self.settings.data_dir,
+                    logger=logger,
+                ).run(task, source_run=run_id)
+                answer = multi_result["answer"]
+            else:
+                multi_result = None
+                answer = _run_agent(
+                    client=self.client.client,
+                    model_name=self.client.model_name,
+                    messages=[{"role": "user", "content": task}],
+                    logger=logger,
+                    data_dir=self.settings.data_dir,
+                    workspace_root=workspace,
+                    max_turns=self.settings.max_steps,
+                    history=history,
+                )
             # Persist both sides of the exchange to conversation history.
             self.store.append_message(conversation_id, "user", task)
             self.store.append_message(conversation_id, "assistant", answer)
@@ -95,7 +122,10 @@ class TaskWorker:
                 "answer": answer,
                 "provider": self.client.provider,
                 "model": self.client.model_name,
+                "mode": mode,
             }
+            if multi_result is not None:
+                result.update({k: v for k, v in multi_result.items() if k != "answer"})
             logger.emit("run.evaluated", result=result)
             logger.write_json("result.json", result)
             self.store.update(run_id, result["status"], result)
@@ -109,6 +139,19 @@ class TaskWorker:
 
     def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         return self.store.list_recent(limit)
+
+    def list_conversations(self, limit: int = 50) -> list[dict[str, Any]]:
+        return self.store.get_conversations(limit)
+
+    def conversation(self, conversation_id: str) -> dict[str, Any] | None:
+        runs = self.store.list_conversation_runs(conversation_id)
+        if not runs:
+            return None
+        return {
+            "conversation_id": conversation_id,
+            "messages": self.store.get_conversation(conversation_id),
+            "runs": runs,
+        }
 
     def events(self, run_id: str) -> list[dict[str, Any]]:
         logger = EventLogger(self.store.runs_dir / run_id)

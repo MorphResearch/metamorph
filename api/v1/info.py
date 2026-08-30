@@ -13,6 +13,7 @@ def handle_get(handler: object, settings: Settings) -> None:
         "version": __version__,
         "provider": settings.provider,
         "model_name": settings.model_name,
+        "mode": settings.mode,
         "allow_write": settings.allow_write,
         "workspace_root": str(settings.workspace_root),
     })
