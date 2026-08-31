@@ -90,8 +90,9 @@ def main() -> None:
     try:
         workspace = args.workspace.expanduser().resolve()
         if settings.mode == "multiagent":
-            def run_role(prompt: str, agent_id: str) -> str:
-                return run_agent(
+            def run_role(prompt: str, agent_id: str) -> dict[str, object]:
+                role_metrics: dict[str, object] = {}
+                answer = run_agent(
                     client=client.client,
                     model_name=client.model_name,
                     messages=[{"role": "user", "content": prompt}],
@@ -99,16 +100,22 @@ def main() -> None:
                     data_dir=settings.data_dir,
                     workspace_root=workspace,
                     max_turns=settings.max_steps,
+                    adapter=client.adapter,
+                    metrics=role_metrics,
+                    max_read_bytes=settings.max_read_bytes,
                 )
+                return {"answer": answer, "metrics": role_metrics}
 
             multi_result = MultiAgentOrchestrator(
                 runner=run_role,
                 data_dir=settings.data_dir,
                 logger=logger,
+                max_parallelism=settings.max_parallel_agents,
             ).run(args.task, source_run=run_id)
             answer = multi_result["answer"]
         else:
             multi_result = None
+            run_metrics: dict[str, object] = {}
             answer = run_agent(
                 client=client.client,
                 model_name=client.model_name,
@@ -117,6 +124,9 @@ def main() -> None:
                 data_dir=settings.data_dir,
                 workspace_root=workspace,
                 max_turns=settings.max_steps,
+                adapter=client.adapter,
+                metrics=run_metrics,
+                max_read_bytes=settings.max_read_bytes,
             )
         result = {
             "run_id": run_id,
@@ -127,6 +137,8 @@ def main() -> None:
             "model": client.model_name,
             "mode": settings.mode,
         }
+        if multi_result is None:
+            result["metrics"] = run_metrics
         if multi_result is not None:
             result.update({k: v for k, v in multi_result.items() if k != "answer"})
         store.append_message(conversation_id, "user", args.task)

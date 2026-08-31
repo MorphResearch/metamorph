@@ -10,8 +10,20 @@ from pydantic import BaseModel
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {}
 
 
-def register(name: str, schema: type[BaseModel], fn: Callable, pass_ctx: bool = False) -> None:
-    TOOL_REGISTRY[name] = {"schema": schema, "fn": fn, "pass_ctx": pass_ctx}
+def register(
+    name: str,
+    schema: type[BaseModel],
+    fn: Callable,
+    pass_ctx: bool = False,
+    ctx_keys: tuple[str, ...] = (),
+) -> None:
+    """Register a tool and the exact runtime context keys it may receive."""
+    TOOL_REGISTRY[name] = {
+        "schema": schema,
+        "fn": fn,
+        "pass_ctx": pass_ctx,
+        "ctx_keys": ctx_keys,
+    }
 
 
 def get_registered_tools() -> list[str]:
@@ -50,12 +62,18 @@ def tool_schemas() -> list[dict[str, Any]]:
 
 def dispatch(name: str, arguments: dict[str, Any], ctx: dict[str, Any]) -> str:
     """Validate arguments and execute the named tool, returning its string output."""
-    meta = TOOL_REGISTRY[name]
+    meta = TOOL_REGISTRY.get(name)
+    if meta is None:
+        return f"工具不存在：{name}"
     try:
         validated = meta["schema"](**arguments)
     except Exception as exc:  # noqa: BLE001
         return f"参数校验失败：{exc}"
     kwargs = validated.model_dump()
-    if meta["pass_ctx"]:
-        return meta["fn"](**kwargs, **ctx)
-    return meta["fn"](**kwargs)
+    try:
+        if meta["pass_ctx"]:
+            scoped_ctx = {key: ctx[key] for key in meta["ctx_keys"] if key in ctx}
+            return str(meta["fn"](**kwargs, **scoped_ctx))
+        return str(meta["fn"](**kwargs))
+    except Exception as exc:  # noqa: BLE001 - tool failures become observations
+        return f"工具执行失败：{exc}"

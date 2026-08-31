@@ -24,6 +24,9 @@ def run_agent(
     max_turns: int = 12,
     emit: Callable[[str, dict[str, Any]], None] | None = None,
     history: list[dict[str, str]] | None = None,
+    adapter: Any | None = None,
+    metrics: dict[str, Any] | None = None,
+    max_read_bytes: int = 100_000,
 ) -> str:
     """Run the agent loop. Returns the final assistant answer text.
 
@@ -32,7 +35,11 @@ def run_agent(
     with ``(event_name, payload)`` for live streaming to the UI; otherwise
     events go through ``logger``.
     """
-    ctx = {"data_dir": Path(data_dir), "workspace_root": Path(workspace_root)}
+    ctx = {
+        "data_dir": Path(data_dir),
+        "workspace_root": Path(workspace_root),
+        "max_read_bytes": max_read_bytes,
+    }
     convo = _build_conversation(messages, ctx["data_dir"], history=history)
     return run_loop(
         client=client,
@@ -42,4 +49,6 @@ def run_agent(
         max_turns=max_turns,
         emit=emit,
         ctx=ctx,
+        adapter=adapter,
+        metrics=metrics,
     )

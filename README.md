@@ -55,10 +55,12 @@ flowchart TB
   → 调用模型、工具和受控 workspace
   → 写入 SQLite、事件日志和运行结果
   → 前端轮询状态并展示最终回答
-  → 多 Agent 额外执行贡献评估、Lesson 记录和下一轮架构建议
+  → 多 Agent 按 DAG 依赖层执行，额外记录贡献评估、消融结果、Lesson 和下一轮架构建议
 ```
 
 当前的架构建议只保存为 candidate，不会自动改写代码、权限或工具。贡献评估目前是可解释的代理指标；后续应通过移除角色、合并角色和屏蔽消息等受控干预，测量真实的因果边际贡献。
+
+每次运行还会记录任务成功率、token 使用量、延迟、工具调用次数，以及移除单个 Agent 后的性能变化。未接入 benchmark scorer 时，任务成功率使用“有无非空输出”的执行代理值，不能替代任务正确率。
 
 ### 代码分层
 
@@ -85,6 +87,9 @@ pip install -e ".[openai,tools]"      # 核心 + 可选工具依赖
 
 # 设置凭证（仅当前终端会话，不落盘）
 export DEEPSEEK_API_KEY="sk-xxx"       # Windows PowerShell: $env:DEEPSEEK_API_KEY="sk-xxx"
+
+# 可选：为本地 API 开启 Bearer token 认证
+export METAMORPH_API_TOKEN="change-me"
 
 # 启动本地服务（默认 DeepSeek + 单 Agent）
 metamorph serve --port 8787
@@ -126,3 +131,4 @@ pytest
 3. 工具即插即用：在 `tools/` 下用 `register()` 声明，自动进入 schema 与 UI。
 4. 所有运行证据（事件、结果）落盘可回溯；刷新页面可恢复完整思考链与工具轨迹。
 5. 多 Agent 的架构建议只作为 candidate 保存，默认不自动修改代码、权限或工具。
+6. 外部 URL 仅允许安全的 HTTP(S) 目标，工具输出、请求体和工作区访问均有大小或路径边界。

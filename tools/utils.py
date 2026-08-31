@@ -24,6 +24,6 @@ def process_tool_result(result: object) -> str:
     if len(text) <= MAX_RESULT_CHARS:
         return text
     head_end = int(MAX_RESULT_CHARS * 0.6)
-    tail_start = head_end + 1
+    tail_start = head_end
     tail = text[tail_start:]
     return f"{text[:head_end]}\n...[省略 {len(text) - MAX_RESULT_CHARS} 字符]...\n{tail}"

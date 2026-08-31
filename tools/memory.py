@@ -8,6 +8,7 @@ registered agent tool.
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -20,6 +21,9 @@ from memory import (
 )
 
 from .base import register
+
+
+_MEMORY_LOCK = Lock()
 
 
 # Re-export for backward-compatible imports from ``tools`` package.
@@ -40,20 +44,23 @@ def update_user_memory(
     content: str = "",
 ) -> str:
     """Persist long-term memory to a local JSONL file (cross-session)."""
-    if mode == "delete":
-        _overwrite_memory_type(data_dir, type, [])
-        return f"已清空 {type} 类型记忆。"
-    if mode == "create":
-        if not content:
-            return "create 模式需要 content。"
-        _append_memory(data_dir, {"type": type, "content": content})
-        return f"已新增 {type} 记忆。"
-    if mode == "update":
-        existing = read_user_memories(data_dir).get(type, [])
-        existing.append({"type": type, "content": content})
-        _overwrite_memory_type(data_dir, type, existing)
-        return f"已更新 {type} 记忆。"
-    return "mode 必须是 create/update/delete。"
+    with _MEMORY_LOCK:
+        if mode == "delete":
+            _overwrite_memory_type(data_dir, type, [])
+            return f"已清空 {type} 类型记忆。"
+        if mode == "create":
+            if not content:
+                return "create 模式需要 content。"
+            _append_memory(data_dir, {"type": type, "content": content})
+            return f"已新增 {type} 记忆。"
+        if mode == "update":
+            if not content:
+                return "update 模式需要 content。"
+            existing = read_user_memories(data_dir).get(type, [])
+            existing.append({"type": type, "content": content})
+            _overwrite_memory_type(data_dir, type, existing)
+            return f"已更新 {type} 记忆。"
+        return "mode 必须是 create/update/delete。"
 
 
-register("update_user_memory", UpdateUserMemoryInput, update_user_memory, pass_ctx=True)
+register("update_user_memory", UpdateUserMemoryInput, update_user_memory, pass_ctx=True, ctx_keys=("data_dir",))

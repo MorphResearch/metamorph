@@ -69,6 +69,8 @@ class AgentResult:
     dependencies: list[str] = field(default_factory=list)
     success: bool = True
     error: str | None = None
+    metrics: dict[str, Any] = field(default_factory=dict)
+    task_success: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,6 +87,11 @@ class AgentContribution:
     redundancy: float
     information_usefulness: float
     notes: list[str] = field(default_factory=list)
+    task_success_rate: float | None = None
+    token_cost: int = 0
+    latency_seconds: float = 0.0
+    tool_calls: int = 0
+    ablation_performance_delta: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -98,6 +105,11 @@ class ContributionReport:
     pairwise_redundancy: list[dict[str, Any]] = field(default_factory=list)
     evaluator_answer: str = ""
     evaluator_source: str = "deterministic"
+    task_success_rate: float | None = None
+    token_cost: int = 0
+    latency_seconds: float = 0.0
+    tool_calls: int = 0
+    ablation_results: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +117,11 @@ class ContributionReport:
             "pairwise_redundancy": self.pairwise_redundancy,
             "evaluator_answer": self.evaluator_answer,
             "evaluator_source": self.evaluator_source,
+            "task_success_rate": self.task_success_rate,
+            "token_cost": self.token_cost,
+            "latency_seconds": self.latency_seconds,
+            "tool_calls": self.tool_calls,
+            "ablation_results": self.ablation_results,
         }
 
 

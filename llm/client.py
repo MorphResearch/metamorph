@@ -13,6 +13,7 @@ from typing import Any
 from types import SimpleNamespace
 
 from .providers import PROVIDER_DEFAULTS, get_supported_providers
+from .adapters import ProviderAdapter, build_adapter
 
 
 @dataclass
@@ -23,6 +24,7 @@ class LLMClient:
     model_name: str
     client: Any
     base_url: str | None = None
+    adapter: ProviderAdapter | None = None
 
 
 def build_client(
@@ -48,14 +50,8 @@ def build_client(
     selected_base_url = base_url or defaults.get("base_url")
 
     if provider == "mock":
-        return LLMClient(provider="mock", model_name=selected_model, client=_MockClient())
-
-    try:
-        from openai import OpenAI
-    except ImportError as exc:  # noqa: BLE001
-        raise RuntimeError(
-            "LLM providers require the optional dependency: pip install -e '.[openai]'"
-        ) from exc
+        mock = _MockClient()
+        return LLMClient(provider="mock", model_name=selected_model, client=mock, adapter=build_adapter("mock", mock))
 
     api_key = os.getenv(selected_key_env)
     if not api_key:
@@ -68,7 +64,14 @@ def build_client(
         except ImportError as exc:  # noqa: BLE001
             raise RuntimeError("Claude mode requires: pip install -e '.[anthropic]'") from exc
         client = Anthropic(api_key=api_key)
-        return LLMClient(provider="claude", model_name=selected_model, client=client)
+        return LLMClient(provider="claude", model_name=selected_model, client=client, adapter=build_adapter("claude", client))
+
+    try:
+        from openai import OpenAI
+    except ImportError as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "LLM providers require the optional dependency: pip install -e '.[openai]'"
+        ) from exc
 
     client = OpenAI(api_key=api_key, base_url=selected_base_url)
     return LLMClient(
@@ -76,6 +79,7 @@ def build_client(
         model_name=selected_model,
         client=client,
         base_url=selected_base_url,
+        adapter=build_adapter(provider, client),
     )
 
 

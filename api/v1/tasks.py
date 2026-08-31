@@ -24,6 +24,9 @@ def submit_task(
     except json.JSONDecodeError as exc:
         json_response(handler, 400, {"error": f"invalid json: {exc}"})
         return
+    if not isinstance(payload, dict):
+        json_response(handler, 400, {"error": "JSON body must be an object"})
+        return
 
     task = str(payload.get("task", "")).strip()
     if not task:

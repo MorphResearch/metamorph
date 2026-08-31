@@ -32,6 +32,7 @@ deployment without vertical-domain coupling.
 │  LLM Layer    │  Memory Layer    │  Tools Layer          │
 │  llm/         │  memory/         │  tools/               │
 │    client.py  │    user_memory   │    base.py            │
+│    adapters.py│    formatter.py   │    web/document/...  │
 │    providers  │    formatter.py  │    web.py             │
 │    thinking   │                  │    document.py        │
 ├───────────────┴──────────────────┴──────────────────────┤
@@ -77,14 +78,16 @@ agent tool registration (`tools/memory.py`). Prompt formatting
 `api/router.py` dispatches on path prefix; `api/middleware.py` provides
 shared helpers (JSON response, static serving, path-traversal guard).
 
-### 5. Thinking Config
-`llm/thinking.py` handles model-specific reasoning/thinking parameters
-(DeepSeek V4 vs V3), mirroring scilink-agent's `thinking_config.py`.
+### 5. Provider Adapter
+`llm/adapters.py` normalizes OpenAI-compatible and Anthropic Messages API
+responses into one protocol for text, reasoning, tool calls, and token usage.
+Model-specific thinking parameters are applied by the OpenAI-compatible adapter.
 
-### 6. Backward Compatibility
-- `api/routes.py` re-exports `serve` from `router.py`
-- `api/service.py` aliases `TaskWorker` as `RunService`
-- All existing import paths continue to work
+### 6. Execution and Safety Boundaries
+Multi-agent roles execute as dependency layers in a bounded DAG; independent
+roles run in parallel. Tool context is scoped per registration, tool output is
+bounded, and API authentication can be enabled with `METAMORPH_API_TOKEN`.
+External fetching rejects non-HTTP(S), private, loopback, and special targets.
 
 ## Tool Registry
 

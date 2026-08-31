@@ -18,7 +18,9 @@ class Settings:
     mode: str = "single"
     base_url: str | None = None
     api_key_env: str | None = None
+    api_token_env: str = "METAMORPH_API_TOKEN"
     max_steps: int = 12
+    max_parallel_agents: int = 8
     max_read_bytes: int = 100_000
     allow_write: bool = False
 
@@ -35,7 +37,9 @@ class Settings:
             mode=os.getenv("METAMORPH_MODE", "single"),
             base_url=os.getenv("METAMORPH_BASE_URL") or None,
             api_key_env=os.getenv("METAMORPH_API_KEY_ENV") or None,
+            api_token_env=os.getenv("METAMORPH_API_TOKEN_ENV", "METAMORPH_API_TOKEN"),
             max_steps=int(os.getenv("METAMORPH_MAX_STEPS", "12")),
+            max_parallel_agents=max(1, int(os.getenv("METAMORPH_MAX_PARALLEL_AGENTS", "8"))),
             max_read_bytes=int(os.getenv("METAMORPH_MAX_READ_BYTES", "100000")),
             allow_write=os.getenv("METAMORPH_ALLOW_WRITE", "0").lower() in {"1", "true", "yes"},
         )

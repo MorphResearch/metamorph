@@ -82,9 +82,10 @@ class TaskWorker:
         self.store.update(run_id, "running")
         try:
             if mode == "multiagent":
-                def run_role(prompt: str, agent_id: str) -> str:
+                def run_role(prompt: str, agent_id: str) -> dict[str, Any]:
                     role_logger = EventLogger(run_dir / "agents" / agent_id)
-                    return _run_agent(
+                    role_metrics: dict[str, Any] = {}
+                    answer = _run_agent(
                         client=self.client.client,
                         model_name=self.client.model_name,
                         messages=[{"role": "user", "content": prompt}],
@@ -92,16 +93,22 @@ class TaskWorker:
                         data_dir=self.settings.data_dir,
                         workspace_root=workspace,
                         max_turns=self.settings.max_steps,
+                        adapter=self.client.adapter,
+                        metrics=role_metrics,
+                        max_read_bytes=self.settings.max_read_bytes,
                     )
+                    return {"answer": answer, "metrics": role_metrics}
 
                 multi_result = MultiAgentOrchestrator(
                     runner=run_role,
                     data_dir=self.settings.data_dir,
                     logger=logger,
-                ).run(task, source_run=run_id)
+                    max_parallelism=self.settings.max_parallel_agents,
+                ).run(task, source_run=run_id, history=history)
                 answer = multi_result["answer"]
             else:
                 multi_result = None
+                run_metrics: dict[str, Any] = {}
                 answer = _run_agent(
                     client=self.client.client,
                     model_name=self.client.model_name,
@@ -111,6 +118,9 @@ class TaskWorker:
                     workspace_root=workspace,
                     max_turns=self.settings.max_steps,
                     history=history,
+                    adapter=self.client.adapter,
+                    metrics=run_metrics,
+                    max_read_bytes=self.settings.max_read_bytes,
                 )
             # Persist both sides of the exchange to conversation history.
             self.store.append_message(conversation_id, "user", task)
@@ -124,6 +134,8 @@ class TaskWorker:
                 "model": self.client.model_name,
                 "mode": mode,
             }
+            if multi_result is None:
+                result["metrics"] = run_metrics
             if multi_result is not None:
                 result.update({k: v for k, v in multi_result.items() if k != "answer"})
             logger.emit("run.evaluated", result=result)

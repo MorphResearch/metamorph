@@ -8,12 +8,13 @@ ThreadingHTTPServer is configured here, delegating request handling through
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from . import __version__
-from .middleware import json_response, static_file
+from .middleware import is_authorized, json_response, static_file
 from .workers import TaskWorker
 from .v1 import conversations, info, runs, tasks
 from config import Settings
@@ -26,6 +27,10 @@ class _RouteHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path.rstrip("/")
         parts = path.split("/")
+
+        if path.startswith("/v1/") and not is_authorized(self, self.worker.settings.api_token_env):
+            json_response(self, 401, {"error": "unauthorized"})
+            return
 
         # Serve static frontend for root and /static/ paths.
         if path in {"", "/"} or path == "/index.html":
@@ -71,11 +76,17 @@ class _RouteHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path.rstrip("/")
+        if path.startswith("/v1/") and not is_authorized(self, self.worker.settings.api_token_env):
+            json_response(self, 401, {"error": "unauthorized"})
+            return
         if path != "/v1/tasks":
             json_response(self, 404, {"error": "not found"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
+            if length < 0 or length > 1_000_000:
+                json_response(self, 413, {"error": "request body is too large"})
+                return
             body = self.rfile.read(length) if length > 0 else b"{}"
         except ValueError:
             json_response(self, 400, {"error": "invalid Content-Length"})
@@ -88,6 +99,8 @@ class _RouteHandler(BaseHTTPRequestHandler):
 
 def serve(settings: Settings, host: str = "127.0.0.1", port: int = 8787, static_root: Path | None = None) -> None:
     """Start the HTTP API + static frontend server."""
+    if host not in {"127.0.0.1", "localhost", "::1"} and not os.getenv(settings.api_token_env):
+        raise RuntimeError(f"refusing to bind API to {host!r} without {settings.api_token_env}")
     resolved_root = static_root or (Path(__file__).resolve().parent / "frontend")
     worker = TaskWorker(settings)
     handler_cls = type("MetamorphHandler", (_RouteHandler,), {

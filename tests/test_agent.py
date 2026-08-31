@@ -21,6 +21,8 @@ from state.store import RunStore
 from multiagent.evaluator import deterministic_report, propose_adjustment
 from multiagent.morphology import classify_task
 from multiagent.orchestrator import MultiAgentOrchestrator
+from api.middleware import safe_workspace_id
+from tools.web import _validate_fetch_url
 
 
 class ToolRegistryTests(unittest.TestCase):
@@ -56,6 +58,16 @@ class MemoryToolTests(unittest.TestCase):
             mem = read_user_memories(data_dir)
             self.assertNotIn("user", mem)
 
+    def test_context_tools_receive_only_their_declared_context(self):
+        with tempfile.TemporaryDirectory() as d:
+            data_dir = Path(d)
+            workspace = data_dir / "workspace"
+            workspace.mkdir()
+            (workspace / "note.txt").write_text("hello", encoding="utf-8")
+            ctx = {"data_dir": data_dir, "workspace_root": workspace, "max_read_bytes": 100}
+            self.assertEqual(dispatch("read_document", {"path": "note.txt"}, ctx), "hello")
+            self.assertIn("已新增", dispatch("update_user_memory", {"mode": "create", "content": "x"}, ctx))
+
 
 class ConfigTests(unittest.TestCase):
     def test_supported_providers(self):
@@ -68,6 +80,14 @@ class ConfigTests(unittest.TestCase):
     def test_settings_defaults(self):
         settings = Settings(data_dir=Path(".metamorph"))
         self.assertEqual(settings.provider, "deepseek")
+
+    def test_security_guards(self):
+        with self.assertRaises(ValueError):
+            safe_workspace_id("../outside")
+        with self.assertRaises(ValueError):
+            _validate_fetch_url("http://127.0.0.1:8787/v1/info")
+        with self.assertRaises(ValueError):
+            _validate_fetch_url("file:///etc/passwd")
 
 
 class StoreTests(unittest.TestCase):
@@ -157,6 +177,91 @@ class MultiAgentTests(unittest.TestCase):
             self.assertIn("contribution_report", result)
             self.assertTrue((Path(d) / "multiagent_lessons.jsonl").exists())
             self.assertIn("architecture.designed", [event[0] for event in events])
+
+    def test_multiagent_report_contains_metrics_and_ablations(self):
+        with tempfile.TemporaryDirectory() as d:
+            class Logger:
+                def emit(self, event_type, **payload):
+                    pass
+
+            def runner(prompt, agent_id):
+                return {
+                    "answer": f"{agent_id} answer",
+                    "metrics": {"total_tokens": 10, "latency_seconds": 0.01, "tool_calls": 2},
+                }
+
+            result = MultiAgentOrchestrator(runner, Path(d), Logger()).run("研究两个方案")
+            report = result["contribution_report"]
+            self.assertGreaterEqual(len(report["ablation_results"]), 1)
+            self.assertEqual(report["token_cost"], 30)
+            self.assertEqual(report["tool_calls"], 6)
+            self.assertIn("ablation_performance_delta", report["agents"][0])
+
+    def test_multiagent_role_prompt_includes_conversation_history(self):
+        with tempfile.TemporaryDirectory() as d:
+            prompts = []
+
+            class Logger:
+                def emit(self, event_type, **payload):
+                    pass
+
+            def runner(prompt, agent_id):
+                prompts.append(prompt)
+                return "answer"
+
+            MultiAgentOrchestrator(runner, Path(d), Logger()).run(
+                "分析这个方案",
+                history=[{"role": "user", "content": "前一个问题"}, {"role": "assistant", "content": "前一个回答"}],
+            )
+            self.assertTrue(any("前一个问题" in prompt for prompt in prompts))
+
+    def test_task_scorer_drives_ablation_performance_delta(self):
+        with tempfile.TemporaryDirectory() as d:
+            class Logger:
+                def emit(self, event_type, **payload):
+                    pass
+
+            def runner(prompt, agent_id):
+                return f"{agent_id} answer"
+
+            scorer = lambda answer: 1.0 if answer.strip() == "synthesizer answer" else 0.0
+            result = MultiAgentOrchestrator(runner, Path(d), Logger(), task_scorer=scorer).run("分析这个方案")
+            ablations = {item["agent_id"]: item for item in result["contribution_report"]["ablation_results"]}
+            self.assertEqual(ablations["synthesizer"]["performance_delta"], -1.0)
+
+    def test_dag_executes_independent_roles_in_parallel(self):
+        from multiagent.models import AgentRole, ArchitecturePlan, TaskMorphology
+        import time
+
+        with tempfile.TemporaryDirectory() as d:
+            class Logger:
+                def emit(self, event_type, **payload):
+                    pass
+
+            active = 0
+            peak = 0
+            lock = __import__("threading").Lock()
+
+            def runner(prompt, agent_id):
+                nonlocal active, peak
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                time.sleep(0.03)
+                with lock:
+                    active -= 1
+                return f"{agent_id} output"
+
+            orchestrator = MultiAgentOrchestrator(runner, Path(d), Logger(), max_parallelism=2)
+            plan = ArchitecturePlan("dag", [], [
+                AgentRole("a", "A", "", ""),
+                AgentRole("b", "B", "", ""),
+                AgentRole("c", "C", "", "", ["a", "b"]),
+            ])
+            morphology = TaskMorphology("general", "low", True, False, False, True, "low")
+            _, results = orchestrator._execute_plan("task", morphology, plan, [], None)
+            self.assertEqual([item.agent_id for item in results], ["a", "b", "c"])
+            self.assertEqual(peak, 2)
 
 
 class ExecutorLoopTests(unittest.TestCase):

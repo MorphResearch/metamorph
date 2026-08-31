@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import ipaddress
+import socket
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -52,14 +54,44 @@ def web_search(query: str, max_results: int = 5) -> str:
 def web_fetch(url: str, max_chars: int = 4000) -> str:
     """Fetch a URL and return readable text (best-effort)."""
     max_chars = max(200, min(20000, int(max_chars)))
+    try:
+        _validate_fetch_url(url)
+    except ValueError as exc:
+        return f"web_fetch 拒绝访问：{exc}"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; MetamorphAgent/0.1)"}
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read(2_000_000).decode("utf-8", errors="ignore")
+        opener = urllib.request.build_opener(_SafeRedirectHandler())
+        with opener.open(req, timeout=15) as resp:
+            raw = resp.read(2_000_001).decode("utf-8", errors="ignore")
+            if len(raw) > 2_000_000:
+                raw = raw[:2_000_000]
     except Exception as exc:  # noqa: BLE001
         return f"web_fetch 失败：{exc}"
     return _html_to_text(raw)[:max_chars]
+
+
+def _validate_fetch_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("只允许访问 http/https URL")
+    if parsed.username or parsed.password or not parsed.hostname:
+        raise ValueError("URL 不得包含用户凭证且必须包含主机名")
+    host = parsed.hostname
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(host, parsed.port, type=socket.SOCK_STREAM)}
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"无法解析目标主机：{host}") from exc
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise ValueError("不允许访问内网或特殊地址")
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+        _validate_fetch_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _html_to_text(html: str) -> str:

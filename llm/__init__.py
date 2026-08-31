@@ -8,6 +8,7 @@ parameters, and ``client.py`` builds the ready-to-use client.
 from .client import build_client, LLMClient
 from .providers import PROVIDER_DEFAULTS, get_supported_providers
 from .thinking import thinking_params_for
+from .adapters import AdapterChunk, AdapterResponse, ProviderAdapter, build_adapter
 
 __all__ = [
     "PROVIDER_DEFAULTS",
@@ -15,4 +16,8 @@ __all__ = [
     "get_supported_providers",
     "LLMClient",
     "thinking_params_for",
+    "AdapterChunk",
+    "AdapterResponse",
+    "ProviderAdapter",
+    "build_adapter",
 ]

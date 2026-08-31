@@ -25,6 +25,14 @@ def read_document(path: str, workspace_root: Path, max_read_bytes: int = 100_000
 
     if not full.exists():
         return f"文件不存在：{path}"
+    if not full.is_file():
+        return f"不是普通文件：{path}"
+
+    try:
+        if full.stat().st_size > max_read_bytes:
+            return f"文件过大，超过读取上限：{max_read_bytes} bytes"
+    except OSError as exc:
+        return f"读取文档失败：{exc}"
 
     suffix = full.suffix.lower()
     try:
@@ -64,4 +72,10 @@ def _read_docx(path: Path) -> str:
         return f"DOCX 解析失败：{exc}"
 
 
-register("read_document", ReadDocumentInput, read_document, pass_ctx=True)
+register(
+    "read_document",
+    ReadDocumentInput,
+    read_document,
+    pass_ctx=True,
+    ctx_keys=("workspace_root", "max_read_bytes"),
+)

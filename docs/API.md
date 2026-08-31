@@ -3,7 +3,7 @@
 The local system can be called from a frontend. The recommended shape is:
 
 ```text
-Browser UI → FastAPI backend → Metamorph runtime → model provider/tools
+Browser UI → local HTTP backend → Metamorph runtime → model provider/tools
                          ├── SQLite: run state
                          └── filesystem: artifacts and trajectories
 ```
@@ -31,7 +31,7 @@ GET /v1/runs/{run_id}/events
   agent, lesson, and contribution events
 ```
 
-The current UI supports continuous conversations, selecting single or multiagent mode, restoring history, and inspecting the run event timeline. Candidate approval and streaming can be added later.
+The current UI supports continuous conversations, selecting single or multiagent mode, restoring history, and inspecting the run event timeline. The API uses polling for event observation; native transport streaming and candidate approval endpoints remain future work.
 
 ## API rules
 
@@ -42,5 +42,9 @@ The current UI supports continuous conversations, selecting single or multiagent
 - require a separate approval action for destructive operations;
 - make each run idempotent and traceable to one configuration snapshot;
 - keep evolution endpoints disabled until the evaluator and rollback path exist.
+
+When `METAMORPH_API_TOKEN` is set, every `/v1/` request requires
+`Authorization: Bearer <token>`. Static frontend assets remain public so the
+local UI can load before making authenticated API requests.
 
 The API layer should remain thin. It starts and observes runs; it should not contain the evolution logic itself.

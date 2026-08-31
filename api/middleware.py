@@ -7,7 +7,9 @@ route handlers stay focused on business logic.
 from __future__ import annotations
 
 import json
+import hmac
 import mimetypes
+import os
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,8 @@ def json_response(handler: Any, status: int, payload: object) -> None:
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
     handler.wfile.write(body)
 
@@ -34,7 +38,11 @@ def static_file(
     """
     root = static_root.resolve()
     target = (root / relative).resolve()
-    if not str(target).startswith(str(root)) or not target.is_file():
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return False
+    if not target.is_file():
         return False
     content_type, _ = mimetypes.guess_type(str(target))
     body = target.read_bytes()
@@ -51,6 +59,21 @@ def safe_workspace_id(value: str) -> str:
     from pathlib import Path as _P
 
     value = str(value).strip()
-    if not value or _P(value).name != value or value in {".", ".."}:
+    if (
+        not value
+        or _P(value).name != value
+        or value in {".", ".."}
+        or "\\" in value
+        or any(ord(char) < 32 for char in value)
+    ):
         raise ValueError("workspace_id must be a simple workspace name")
     return value
+
+
+def is_authorized(handler: Any, token_env: str) -> bool:
+    """Require a Bearer token when the server operator configured one."""
+    expected = os.getenv(token_env)
+    if not expected:
+        return True
+    authorization = str(handler.headers.get("Authorization", ""))
+    return hmac.compare_digest(authorization, f"Bearer {expected}")

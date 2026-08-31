@@ -28,12 +28,24 @@ def _clamp(value: float) -> float:
     return round(max(0.0, min(1.0, value)), 3)
 
 
-def deterministic_report(plan: ArchitecturePlan, results: list[AgentResult]) -> ContributionReport:
-    """Produce reproducible proxy measurements before an LLM judge is added."""
+def deterministic_report(
+    plan: ArchitecturePlan,
+    results: list[AgentResult],
+    ablation_results: list[dict[str, Any]] | None = None,
+    task_success_score: float | None = None,
+    latency_seconds: float | None = None,
+) -> ContributionReport:
+    """Produce reproducible contribution measurements.
+
+    ``task_success`` is supplied by an optional benchmark scorer. Until one is
+    supplied, execution success (non-empty answer without an exception) is
+    used as an explicitly weaker fallback.
+    """
 
     by_id = {result.agent_id: result for result in results}
     contributions: list[AgentContribution] = []
     pairwise: list[dict[str, Any]] = []
+    ablation_by_agent = {item.get("agent_id"): item for item in (ablation_results or [])}
     for result in results:
         peers = [other for other in results if other.agent_id != result.agent_id]
         max_similarity = max((_jaccard(result.answer, peer.answer) for peer in peers), default=0.0)
@@ -50,7 +62,27 @@ def deterministic_report(plan: ArchitecturePlan, results: list[AgentResult]) -> 
             notes.append("与其他 Agent 输出高度相似，建议考虑合并。")
         if not result.answer:
             notes.append("没有产生有效输出。")
-        contributions.append(AgentContribution(result.agent_id, marginal, correction, distinctiveness, redundancy, _clamp(usefulness), notes))
+        success_rate = result.task_success
+        if success_rate is None:
+            success_rate = 1.0 if result.success and result.answer else 0.0
+            notes.append("任务成功率暂使用执行成功代理值，benchmark 接入后应替换为任务级评分。")
+        metric = result.metrics or {}
+        token_cost = int(metric.get("total_tokens", 0) or 0)
+        ablation = ablation_by_agent.get(result.agent_id, {})
+        contributions.append(AgentContribution(
+            result.agent_id,
+            marginal,
+            correction,
+            distinctiveness,
+            redundancy,
+            _clamp(usefulness),
+            notes,
+            _clamp(float(success_rate)),
+            token_cost,
+            float(metric.get("latency_seconds", 0.0) or 0.0),
+            int(metric.get("tool_calls", 0) or 0),
+            ablation.get("performance_delta"),
+        ))
 
     for index, left in enumerate(results):
         for right in results[index + 1:]:
@@ -58,7 +90,24 @@ def deterministic_report(plan: ArchitecturePlan, results: list[AgentResult]) -> 
             if similarity >= 0.5:
                 pairwise.append({"left": left.agent_id, "right": right.agent_id, "redundancy": similarity})
 
-    return ContributionReport(contributions, pairwise)
+    known_success = [item.task_success for item in results if item.task_success is not None]
+    inferred_success_rate = (
+        sum(float(value) for value in known_success) / len(known_success)
+        if known_success
+        else sum(item.success and bool(item.answer) for item in results) / len(results) if results else 0.0
+    )
+    return ContributionReport(
+        contributions,
+        pairwise,
+        task_success_rate=_clamp(task_success_score if task_success_score is not None else inferred_success_rate),
+        token_cost=sum(int((item.metrics or {}).get("total_tokens", 0) or 0) for item in results),
+        latency_seconds=round(
+            latency_seconds if latency_seconds is not None else sum(float((item.metrics or {}).get("latency_seconds", 0.0) or 0.0) for item in results),
+            6,
+        ),
+        tool_calls=sum(int((item.metrics or {}).get("tool_calls", 0) or 0) for item in results),
+        ablation_results=ablation_results or [],
+    )
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
@@ -80,7 +129,7 @@ def enrich_with_evaluator_agent(
     report: ContributionReport,
     plan: ArchitecturePlan,
     results: list[AgentResult],
-    runner: Callable[[str, str], str] | None,
+    runner: Callable[[str, str], Any] | None,
 ) -> ContributionReport:
     """Ask a dedicated evaluator role for a structured second opinion.
 
@@ -102,7 +151,8 @@ def enrich_with_evaluator_agent(
         "\"agent_findings\": [{\"agent_id\": str, \"finding\": str}]}。\n"
         + json.dumps(payload, ensure_ascii=False)
     )
-    answer = runner(prompt, "evaluator")
+    raw_answer = runner(prompt, "evaluator")
+    answer = raw_answer if isinstance(raw_answer, str) else str((raw_answer or {}).get("answer", ""))
     parsed = _extract_json(answer)
     report.evaluator_answer = answer
     report.evaluator_source = "llm+deterministic" if parsed else "deterministic-fallback"
