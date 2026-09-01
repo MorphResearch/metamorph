@@ -27,6 +27,8 @@ def run_agent(
     adapter: Any | None = None,
     metrics: dict[str, Any] | None = None,
     max_read_bytes: int = 100_000,
+    allowed_tool_names: set[str] | None = None,
+    max_tool_calls: int | None = None,
 ) -> str:
     """Run the agent loop. Returns the final assistant answer text.
 
@@ -51,4 +53,6 @@ def run_agent(
         ctx=ctx,
         adapter=adapter,
         metrics=metrics,
+        allowed_tool_names=allowed_tool_names,
+        max_tool_calls=max_tool_calls,
     )

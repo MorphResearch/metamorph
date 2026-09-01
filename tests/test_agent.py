@@ -21,6 +21,9 @@ from state.store import RunStore
 from multiagent.evaluator import deterministic_report, propose_adjustment
 from multiagent.morphology import classify_task
 from multiagent.orchestrator import MultiAgentOrchestrator
+from multiagent.models import AgentRole, ArchitecturePlan, BudgetPolicy
+from multiagent.contracts import compile_plan
+from multiagent.lessons import LessonStore
 from api.middleware import safe_workspace_id
 from tools.web import _validate_fetch_url
 
@@ -175,8 +178,72 @@ class MultiAgentTests(unittest.TestCase):
             result = MultiAgentOrchestrator(runner, Path(d), Logger()).run("研究并比较两个方案")
             self.assertEqual(result["mode"], "multiagent")
             self.assertIn("contribution_report", result)
-            self.assertTrue((Path(d) / "multiagent_lessons.jsonl").exists())
+            self.assertIn("causal_audits", result)
             self.assertIn("architecture.designed", [event[0] for event in events])
+
+    def test_dag_compiler_rejects_cycles_and_bad_dependencies(self):
+        cyclic = ArchitecturePlan("cycle", [], [
+            AgentRole("a", "A", "", "", ["b"]),
+            AgentRole("b", "B", "", "", ["a"]),
+        ])
+        compiled = compile_plan(cyclic)
+        self.assertFalse(compiled["valid"])
+        self.assertIn("dependency graph is cyclic", compiled["issues"])
+
+    def test_causal_edge_audit_uses_typed_null_and_promotes_repeated_evidence(self):
+        with tempfile.TemporaryDirectory() as d:
+            prompts = []
+
+            class Logger:
+                def emit(self, event_type, **payload):
+                    pass
+
+            def runner(prompt, agent_id):
+                prompts.append(prompt)
+                if "typed-null-artifact" in prompt or "BROKEN" in prompt:
+                    answer = "BROKEN"
+                else:
+                    answer = "GOOD"
+                return {"answer": answer, "metrics": {"total_tokens": 1, "tool_calls": 0}}
+
+            scorer = lambda answer: 0.0 if "BROKEN" in answer else 1.0
+            orchestrator = MultiAgentOrchestrator(
+                runner,
+                Path(d),
+                Logger(),
+                task_scorer=scorer,
+                budget_policy=BudgetPolicy(max_causal_audits=1, uncertainty_penalty=0.01),
+            )
+            first = orchestrator.run("研究一个问题", source_run="run-1")
+            second = orchestrator.run("研究一个问题", source_run="run-2")
+            self.assertTrue(any("typed-null-artifact" in prompt for prompt in prompts))
+            self.assertEqual(first["causal_audits"][0]["status"], "completed")
+            lessons = LessonStore(Path(d)).all()
+            self.assertEqual(len(lessons), 1)
+            self.assertEqual(lessons[0]["status"], "Active")
+            self.assertGreater(lessons[0]["strength"], 0.0)
+            self.assertEqual(second["lesson_admissions"][0]["status"], "Active")
+
+    def test_budget_gate_stops_causal_audits_before_replay(self):
+        with tempfile.TemporaryDirectory() as d:
+            prompts = []
+
+            class Logger:
+                def emit(self, event_type, **payload):
+                    pass
+
+            def runner(prompt, agent_id):
+                prompts.append(prompt)
+                return {"answer": "answer", "metrics": {"total_tokens": 1}}
+
+            result = MultiAgentOrchestrator(
+                runner,
+                Path(d),
+                Logger(),
+                budget_policy=BudgetPolicy(max_total_tokens=3, max_causal_audits=2),
+            ).run("研究一个问题")
+            self.assertTrue(all(item["status"] == "stopped" for item in result["causal_audits"]))
+            self.assertFalse(any("typed-null-artifact" in prompt for prompt in prompts))
 
     def test_multiagent_report_contains_metrics_and_ablations(self):
         with tempfile.TemporaryDirectory() as d:

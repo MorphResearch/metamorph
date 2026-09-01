@@ -53,6 +53,8 @@ def run_loop(
     ctx: dict[str, Path],
     adapter: Any | None = None,
     metrics: dict[str, Any] | None = None,
+    allowed_tool_names: set[str] | None = None,
+    max_tool_calls: int | None = None,
 ) -> str:
     """Execute the agent loop. Returns the final assistant answer."""
     adapter = adapter or OpenAICompatibleAdapter(client)
@@ -75,7 +77,8 @@ def run_loop(
             usage: dict[str, int] = {}
 
             try:
-                for chunk in adapter.stream(model_name=model_name, messages=convo, tools=tool_schemas()):
+                available_tools = [] if max_tool_calls is not None and run_metrics["tool_calls"] >= max_tool_calls else tool_schemas(allowed_tool_names)
+                for chunk in adapter.stream(model_name=model_name, messages=convo, tools=available_tools):
                     if chunk.reasoning:
                         reasoning_parts.append(chunk.reasoning)
                         logger.emit("reasoning", text=chunk.reasoning)
@@ -134,7 +137,7 @@ def run_loop(
                     arguments = json.loads(tc["arguments"] or "{}")
                 except json.JSONDecodeError:
                     arguments = {}
-                result = dispatch(name, arguments, ctx)
+                result = dispatch(name, arguments, ctx, allowed_tool_names)
                 result = __import__("tools.utils", fromlist=["process_tool_result"]).process_tool_result(result)
                 ok = not result.startswith(("参数校验失败：", "工具执行失败：", "工具不存在："))
                 logger.emit(

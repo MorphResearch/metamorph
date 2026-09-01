@@ -17,6 +17,7 @@ from llm.client import build_client
 from state.events import EventLogger
 from state.store import RunStore
 from multiagent.orchestrator import MultiAgentOrchestrator
+from multiagent.models import BudgetPolicy
 
 
 class TaskWorker:
@@ -104,6 +105,12 @@ class TaskWorker:
                     data_dir=self.settings.data_dir,
                     logger=logger,
                     max_parallelism=self.settings.max_parallel_agents,
+                    budget_policy=BudgetPolicy(
+                        max_total_tokens=self.settings.max_total_tokens,
+                        max_latency_seconds=self.settings.max_latency_seconds,
+                        max_tool_calls=self.settings.max_tool_calls,
+                        max_causal_audits=self.settings.max_causal_audits,
+                    ),
                 ).run(task, source_run=run_id, history=history)
                 answer = multi_result["answer"]
             else:

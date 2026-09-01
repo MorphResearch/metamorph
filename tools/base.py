@@ -56,13 +56,15 @@ def openai_tool_schema(name: str, pydantic_schema: type[BaseModel]) -> dict[str,
     }
 
 
-def tool_schemas() -> list[dict[str, Any]]:
-    return [openai_tool_schema(name, meta["schema"]) for name, meta in TOOL_REGISTRY.items()]
+def tool_schemas(allowed_names: set[str] | None = None) -> list[dict[str, Any]]:
+    return [openai_tool_schema(name, meta["schema"]) for name, meta in TOOL_REGISTRY.items() if allowed_names is None or name in allowed_names]
 
 
-def dispatch(name: str, arguments: dict[str, Any], ctx: dict[str, Any]) -> str:
+def dispatch(name: str, arguments: dict[str, Any], ctx: dict[str, Any], allowed_names: set[str] | None = None) -> str:
     """Validate arguments and execute the named tool, returning its string output."""
     meta = TOOL_REGISTRY.get(name)
+    if allowed_names is not None and name not in allowed_names:
+        return f"工具不存在：{name}"
     if meta is None:
         return f"工具不存在：{name}"
     try:

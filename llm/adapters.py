@@ -8,6 +8,7 @@ specific SDK details from leaking into ``graphs.loop``.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
@@ -102,7 +103,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             "messages": messages,
             "tools": tools,
             "tool_choice": "auto",
-            "max_tokens": 4096,
+            "max_tokens": max(1, int(os.getenv("METAMORPH_MAX_OUTPUT_TOKENS", "4096"))),
             "stream": stream,
         }
         kwargs.update(thinking_params_for(model_name))
@@ -195,7 +196,7 @@ class AnthropicAdapter(ProviderAdapter):
         system, converted = _anthropic_messages(messages)
         kwargs: dict[str, Any] = {
             "model": model_name,
-            "max_tokens": 4096,
+            "max_tokens": max(1, int(os.getenv("METAMORPH_MAX_OUTPUT_TOKENS", "4096"))),
             "messages": converted,
             "tools": _anthropic_tools(tools),
         }

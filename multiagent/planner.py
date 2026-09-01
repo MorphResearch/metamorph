@@ -79,3 +79,28 @@ def design_architecture(
         roles=roles,
         prior_lessons_used=lessons[-3:],
     )
+
+
+def apply_active_lessons(plan: ArchitecturePlan, lessons: list[dict[str, Any]]) -> tuple[ArchitecturePlan, list[dict[str, Any]]]:
+    """Apply only safe, explicit DAG patches from already Active lessons.
+
+    Lessons never add tools, permissions, or code changes. Unknown role IDs and
+    unsupported edits are rejected so a stale lesson cannot silently reshape a
+    new task graph.
+    """
+
+    role_by_id = {role.agent_id: role for role in plan.roles}
+    applied: list[dict[str, Any]] = []
+    for lesson in lessons:
+        edit = lesson.get("dag_edit") or {}
+        if edit.get("operation") != "remove_dependency":
+            continue
+        source, target = edit.get("source"), edit.get("target")
+        role = role_by_id.get(str(target))
+        if not source or role is None or source not in role.dependencies:
+            continue
+        role.dependencies = [dependency for dependency in role.dependencies if dependency != source]
+        applied.append({"lesson_id": lesson.get("lesson_id"), "dag_edit": edit})
+    if applied:
+        plan.rationale.append(f"已应用 {len(applied)} 条经因果验证的 Active DAG lesson。")
+    return plan, applied
