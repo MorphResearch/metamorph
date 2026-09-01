@@ -97,6 +97,10 @@ class TaskWorker:
                         adapter=self.client.adapter,
                         metrics=role_metrics,
                         max_read_bytes=self.settings.max_read_bytes,
+                        max_tool_calls=self.settings.max_tool_calls,
+                        max_total_tokens=self.settings.max_total_tokens,
+                        max_latency_seconds=self.settings.max_latency_seconds,
+                        allow_write=self.settings.allow_write,
                     )
                     return {"answer": answer, "metrics": role_metrics}
 
@@ -110,6 +114,7 @@ class TaskWorker:
                         max_latency_seconds=self.settings.max_latency_seconds,
                         max_tool_calls=self.settings.max_tool_calls,
                         max_causal_audits=self.settings.max_causal_audits,
+                        allow_write=self.settings.allow_write,
                     ),
                 ).run(task, source_run=run_id, history=history)
                 answer = multi_result["answer"]
@@ -128,6 +133,10 @@ class TaskWorker:
                     adapter=self.client.adapter,
                     metrics=run_metrics,
                     max_read_bytes=self.settings.max_read_bytes,
+                    max_total_tokens=self.settings.max_total_tokens,
+                    max_latency_seconds=self.settings.max_latency_seconds,
+                    max_tool_calls=self.settings.max_tool_calls,
+                    allow_write=self.settings.allow_write,
                 )
             # Persist both sides of the exchange to conversation history.
             self.store.append_message(conversation_id, "user", task)

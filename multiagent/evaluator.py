@@ -37,9 +37,9 @@ def deterministic_report(
 ) -> ContributionReport:
     """Produce reproducible contribution measurements.
 
-    ``task_success`` is supplied by an optional benchmark scorer. Until one is
-    supplied, execution success (non-empty answer without an exception) is
-    used as an explicitly weaker fallback.
+    ``task_success`` is supplied by a benchmark/task scorer. Without one, the
+    report leaves task success unknown; execution success is tracked separately
+    and must not be promoted to benchmark success.
     """
 
     by_id = {result.agent_id: result for result in results}
@@ -64,8 +64,7 @@ def deterministic_report(
             notes.append("没有产生有效输出。")
         success_rate = result.task_success
         if success_rate is None:
-            success_rate = 1.0 if result.success and result.answer else 0.0
-            notes.append("任务成功率暂使用执行成功代理值，benchmark 接入后应替换为任务级评分。")
+            notes.append("未提供任务级评分器；该 Agent 的 task_success_rate 保持未知。")
         metric = result.metrics or {}
         token_cost = int(metric.get("total_tokens", 0) or 0)
         ablation = ablation_by_agent.get(result.agent_id, {})
@@ -77,7 +76,7 @@ def deterministic_report(
             redundancy,
             _clamp(usefulness),
             notes,
-            _clamp(float(success_rate)),
+            _clamp(float(success_rate)) if success_rate is not None else None,
             token_cost,
             float(metric.get("latency_seconds", 0.0) or 0.0),
             int(metric.get("tool_calls", 0) or 0),
@@ -91,15 +90,15 @@ def deterministic_report(
                 pairwise.append({"left": left.agent_id, "right": right.agent_id, "redundancy": similarity})
 
     known_success = [item.task_success for item in results if item.task_success is not None]
-    inferred_success_rate = (
-        sum(float(value) for value in known_success) / len(known_success)
-        if known_success
-        else sum(item.success and bool(item.answer) for item in results) / len(results) if results else 0.0
-    )
+    inferred_success_rate = sum(float(value) for value in known_success) / len(known_success) if known_success else None
     return ContributionReport(
         contributions,
         pairwise,
-        task_success_rate=_clamp(task_success_score if task_success_score is not None else inferred_success_rate),
+        task_success_rate=(
+            _clamp(task_success_score if task_success_score is not None else inferred_success_rate)
+            if task_success_score is not None or inferred_success_rate is not None
+            else None
+        ),
         token_cost=sum(int((item.metrics or {}).get("total_tokens", 0) or 0) for item in results),
         latency_seconds=round(
             latency_seconds if latency_seconds is not None else sum(float((item.metrics or {}).get("latency_seconds", 0.0) or 0.0) for item in results),

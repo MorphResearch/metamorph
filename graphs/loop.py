@@ -50,11 +50,13 @@ def run_loop(
     logger: Any,
     max_turns: int,
     emit: Callable[[str, dict[str, Any]], None] | None,
-    ctx: dict[str, Path],
+    ctx: dict[str, Any],
     adapter: Any | None = None,
     metrics: dict[str, Any] | None = None,
     allowed_tool_names: set[str] | None = None,
     max_tool_calls: int | None = None,
+    max_total_tokens: int | None = None,
+    max_latency_seconds: float | None = None,
 ) -> str:
     """Execute the agent loop. Returns the final assistant answer."""
     adapter = adapter or OpenAICompatibleAdapter(client)
@@ -71,13 +73,26 @@ def run_loop(
     answer = ""
     try:
         for turn in range(1, max_turns + 1):
+            budget_reasons: list[str] = []
+            if max_total_tokens is not None and run_metrics["total_tokens"] >= max_total_tokens:
+                budget_reasons.append("token budget exhausted")
+            if max_latency_seconds is not None and time.perf_counter() - started >= max_latency_seconds:
+                budget_reasons.append("latency budget exhausted")
+            if budget_reasons:
+                logger.emit("budget.stopped", step=turn, reasons=budget_reasons)
+                break
             reasoning_parts: list[str] = []
             assistant_content = ""
             tool_calls: list[dict[str, Any]] = []
             usage: dict[str, int] = {}
+            remaining_tool_calls = (
+                None
+                if max_tool_calls is None
+                else max(0, max_tool_calls - run_metrics["tool_calls"])
+            )
 
             try:
-                available_tools = [] if max_tool_calls is not None and run_metrics["tool_calls"] >= max_tool_calls else tool_schemas(allowed_tool_names)
+                available_tools = [] if remaining_tool_calls == 0 else tool_schemas(allowed_tool_names)
                 for chunk in adapter.stream(model_name=model_name, messages=convo, tools=available_tools):
                     if chunk.reasoning:
                         reasoning_parts.append(chunk.reasoning)
@@ -91,11 +106,25 @@ def run_loop(
                     if chunk.usage:
                         usage.update(chunk.usage)
             except (TypeError, NotImplementedError):
-                response = adapter.complete(model_name=model_name, messages=convo, tools=tool_schemas())
+                # Preserve stage-level tool isolation on non-streaming fallback.
+                response = adapter.complete(
+                    model_name=model_name,
+                    messages=convo,
+                    tools=available_tools,
+                )
                 assistant_content = response.content
                 reasoning_parts.append(response.reasoning)
                 tool_calls.extend(response.tool_calls)
                 usage.update(response.usage)
+
+            if remaining_tool_calls is not None and len(tool_calls) > remaining_tool_calls:
+                logger.emit(
+                    "tool.budget_truncated",
+                    step=turn,
+                    requested=len(tool_calls),
+                    permitted=remaining_tool_calls,
+                )
+                tool_calls = tool_calls[:remaining_tool_calls]
 
             run_metrics["llm_calls"] += 1
             for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
@@ -139,7 +168,7 @@ def run_loop(
                     arguments = {}
                 result = dispatch(name, arguments, ctx, allowed_tool_names)
                 result = __import__("tools.utils", fromlist=["process_tool_result"]).process_tool_result(result)
-                ok = not result.startswith(("参数校验失败：", "工具执行失败：", "工具不存在："))
+                ok = not result.startswith(("参数校验失败：", "工具执行失败：", "工具不存在：", "工具执行被拒绝："))
                 logger.emit(
                     "tool.completed",
                     step=turn,

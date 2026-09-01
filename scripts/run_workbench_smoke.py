@@ -17,10 +17,10 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Literal
 
 import pandas as pd
-from pydantic import Field, create_model
+from pydantic import BaseModel, Field, create_model
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +61,95 @@ def _mutation_required(task: str) -> bool:
     return bool(MUTATION_WORDS.search(task))
 
 
+def _required_write_args(tool: Any) -> set[str]:
+    """Return semantic required fields for WorkBench's permissive tool API.
+
+    WorkBench annotates many mutation parameters as ``Optional`` so that its
+    generic tool loop can emit a readable error. The controller must still
+    reject incomplete planner handoffs before entering the write phase.
+    """
+    operation = tool.name.rsplit(".", maxsplit=1)[-1]
+    arguments = set(tool.args_schema)
+    if operation == "add_customer":
+        return {"customer_name", "assigned_to_email", "status"}
+    if operation.startswith(("create_", "update_", "send_", "forward_", "reply_")):
+        return arguments
+    if operation.startswith("delete_"):
+        return arguments
+    return arguments
+
+
+class PlannerHandoff(BaseModel):
+    """Strict planner-to-executor contract for state-changing tasks."""
+
+    status: Literal["READY", "BLOCKED"]
+    tool: str | None = None
+    arguments: dict[str, str] = Field(default_factory=dict)
+    evidence: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    """Extract one JSON object from a model response, including code fences."""
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.IGNORECASE | re.DOTALL).strip()
+    try:
+        value = json.loads(candidate)
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        start, end = candidate.find("{"), candidate.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            value = json.loads(candidate[start:end + 1])
+            return value if isinstance(value, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+
+def _validate_handoff(
+    answer: str,
+    *,
+    write_tools: set[str],
+    safe_to_official: dict[str, str],
+    task_tools: list[Any],
+) -> tuple[PlannerHandoff | None, str | None]:
+    payload = _extract_json_object(answer)
+    if payload is None:
+        return None, "planner did not return a JSON handoff"
+    try:
+        handoff = PlannerHandoff.model_validate(payload)
+    except Exception as exc:  # noqa: BLE001 - invalid model output becomes BLOCKED
+        return None, f"invalid planner handoff: {exc}"
+    if handoff.status == "BLOCKED":
+        if handoff.tool is not None or handoff.arguments:
+            return None, "BLOCKED handoff must not contain a tool or arguments"
+        return handoff, None
+    if handoff.tool not in write_tools:
+        # Accept an official tool name, then normalize it to the safe registry name.
+        safe_name = next((safe for safe, official in safe_to_official.items() if official == handoff.tool), None)
+        if safe_name is None:
+            return None, "planner selected a tool outside the write allowlist"
+        handoff.tool = safe_name
+    selected = next((tool for tool in task_tools if _safe_tool_name(tool.name) == handoff.tool), None)
+    if selected is None:
+        return None, "planner selected an unknown write tool"
+    expected = set(selected.args_schema)
+    required = _required_write_args(selected)
+    missing = sorted(required - set(handoff.arguments))
+    unknown = sorted(set(handoff.arguments) - expected)
+    empty = sorted(name for name in required if not str(handoff.arguments.get(name, "")).strip())
+    if missing or empty:
+        missing = sorted(set(missing) | set(empty))
+        return None, f"planner handoff is missing required arguments: {', '.join(missing)}"
+    if unknown:
+        return None, f"planner handoff contains unknown arguments: {', '.join(unknown)}"
+    if not handoff.evidence:
+        return None, "planner handoff is missing evidence"
+    return handoff, None
+
+
 @contextmanager
 def workbench_tools(tools: list[Any], calls: list[tuple[str, dict[str, str]]]) -> Iterator[dict[str, str]]:
     """Temporarily expose a task's official WorkBench tools.
@@ -94,7 +183,7 @@ def workbench_tools(tools: list[Any], calls: list[tuple[str, dict[str, str]]]) -
             calls.append((_tool.name, normalized))
             return str(value)
 
-        register(safe_name, schema, invoke)
+        register(safe_name, schema, invoke, mutates=_is_write_tool(workbench_tool.name))
         safe_to_official[safe_name] = workbench_tool.name
     try:
         yield safe_to_official
@@ -120,6 +209,9 @@ def _run_phase(
     run_dir: Path,
     max_turns: int,
     max_tool_calls: int,
+    max_total_tokens: int | None = None,
+    max_latency_seconds: float | None = None,
+    allow_write: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Run an isolated controller phase and preserve its own event stream."""
     phase_metrics: dict[str, Any] = {}
@@ -135,6 +227,9 @@ def _run_phase(
         metrics=phase_metrics,
         allowed_tool_names=allowed_tools,
         max_tool_calls=max_tool_calls,
+        max_total_tokens=max_total_tokens,
+        max_latency_seconds=max_latency_seconds,
+        allow_write=allow_write,
     )
     return answer, phase_metrics
 
@@ -146,6 +241,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-index", type=int, default=0)
     parser.add_argument("--max-turns", type=int, default=8, help="Compatibility cap; phases use tighter caps.")
     parser.add_argument("--max-tool-calls", type=int, default=5, help="Compatibility cap; phases use tighter caps.")
+    parser.add_argument("--token-budget", type=int, default=80_000, help="One shared token budget across all phases.")
+    parser.add_argument("--max-latency-seconds", type=float, default=300.0, help="One shared wall-clock budget across all phases.")
+    parser.add_argument("--allow-write", action="store_true", help="Explicitly allow WorkBench mutation calls.")
     return parser.parse_args()
 
 
@@ -172,12 +270,22 @@ def main() -> None:
     run_dir = workbench_dir / "metamorph_runs" / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     settings = Settings.from_environment(data_dir=run_dir / "metamorph_state")
+    allow_write = settings.allow_write or args.allow_write
     client = build_client(settings.provider, settings.model_name, settings.base_url, settings.api_key_env)
     calls: list[tuple[str, dict[str, str]]] = []
     aggregate_metrics: dict[str, Any] = {}
     phases: dict[str, dict[str, Any]] = {}
     reset_state()
     started = time.perf_counter()
+
+    def remaining_tool_calls() -> int:
+        return max(0, args.max_tool_calls - int(aggregate_metrics.get("tool_calls", 0) or 0))
+
+    def remaining_tokens() -> int:
+        return max(0, args.token_budget - int(aggregate_metrics.get("total_tokens", 0) or 0))
+
+    def remaining_latency() -> float:
+        return max(0.0, args.max_latency_seconds - (time.perf_counter() - started))
 
     with workbench_tools(task_tools, calls) as safe_to_official:
         read_tools = {safe for safe, official in safe_to_official.items() if not _is_write_tool(official)}
@@ -190,9 +298,11 @@ def main() -> None:
             "to resolve every constraint in the task (for example, ordering, date, title, participant, and duration). "
             "For an ordinal calendar request such as 'first meeting', use the chronologically earliest matching event; "
             "do not infer an unstated account owner or debate that convention. "
-            "When evidence is sufficient, finish with an EXECUTION PLAN containing the exact official write action, "
-            "its complete arguments, and the evidence (especially IDs) supporting them. Keep the final plan to three lines. "
-            "If evidence is insufficient, finish with BLOCKED and explain what is missing.\n\nTASK:\n" + task
+            "When evidence is sufficient, return exactly one JSON object and no markdown: "
+            "{\"status\":\"READY\",\"tool\":\"<safe write tool name>\","
+            "\"arguments\":{\"<arg>\":\"<value>\"},\"evidence\":[\"<fact supporting the action>\"],\"reason\":\"\"}. "
+            "Use the exact safe write tool name shown by the tool schema. If evidence is insufficient, return "
+            "{\"status\":\"BLOCKED\",\"tool\":null,\"arguments\":{},\"evidence\":[],\"reason\":\"<missing evidence>\"}.\n\nTASK:\n" + task
         )
         planner_answer, planner_metrics = _run_phase(
             name="planner",
@@ -205,22 +315,36 @@ def main() -> None:
             # One extra turn after the bounded read calls is required to turn
             # observations into an explicit executor hand-off.
             max_turns=min(args.max_turns, 6),
-            max_tool_calls=min(args.max_tool_calls, 5),
+            max_tool_calls=min(remaining_tool_calls(), 5),
+            max_total_tokens=remaining_tokens(),
+            max_latency_seconds=remaining_latency(),
         )
-        phases["planner"] = {"status": "completed" if planner_answer.strip() else "failed", "metrics": planner_metrics}
+        handoff, handoff_error = _validate_handoff(
+            planner_answer,
+            write_tools=write_tools,
+            safe_to_official=safe_to_official,
+            task_tools=task_tools,
+        ) if requires_mutation else (None, None)
+        phases["planner"] = {
+            "status": "ready" if handoff and handoff.status == "READY" else "blocked" if handoff and handoff.status == "BLOCKED" else "invalid" if requires_mutation else "completed",
+            "metrics": planner_metrics,
+            "handoff": handoff.model_dump() if handoff else None,
+            "handoff_error": handoff_error,
+        }
         _merge_metrics(aggregate_metrics, planner_metrics)
 
         writes_before = len(calls)
         executor_answer = ""
         executor_metrics: dict[str, Any] = {}
-        if requires_mutation:
+        if requires_mutation and handoff and handoff.status == "READY":
             executor_prompt = (
                 "You are the write-only execution phase of a WorkBench controller. "
                 "Use only the provided write tools. Do not search or retrieve data. "
                 "Execute exactly one well-supported mutation from the planner's evidence. "
                 "If the plan lacks a precise target or required parameter, do not guess: reply BLOCKED without calling a tool. "
                 "After a successful tool call, briefly report the executed action.\n\n"
-                "TASK:\n" + task + "\n\nPLANNER OUTPUT:\n" + planner_answer
+                "TASK:\n" + task + "\n\nVALIDATED PLANNER HANDOFF (use exactly this tool and arguments):\n" +
+                json.dumps(handoff.model_dump(), ensure_ascii=False)
             )
             executor_answer, executor_metrics = _run_phase(
                 name="executor",
@@ -231,7 +355,10 @@ def main() -> None:
                 adapter=client.adapter,
                 run_dir=run_dir,
                 max_turns=min(args.max_turns, 2),
-                max_tool_calls=1,
+                max_tool_calls=min(remaining_tool_calls(), 1),
+                max_total_tokens=remaining_tokens(),
+                max_latency_seconds=remaining_latency(),
+                allow_write=allow_write,
             )
             _merge_metrics(aggregate_metrics, executor_metrics)
         write_calls = [call for call in calls[writes_before:] if _is_write_tool(call[0])]
@@ -260,7 +387,9 @@ def main() -> None:
                 adapter=client.adapter,
                 run_dir=run_dir,
                 max_turns=min(args.max_turns, 3),
-                max_tool_calls=min(args.max_tool_calls, 2),
+                max_tool_calls=min(remaining_tool_calls(), 2),
+                max_total_tokens=remaining_tokens(),
+                max_latency_seconds=remaining_latency(),
             )
             _merge_metrics(aggregate_metrics, verifier_metrics)
         phases["verifier"] = {
@@ -269,7 +398,10 @@ def main() -> None:
         }
 
     predicted_actions = [convert_intermediate_step_to_function_call(name, tool_input) for name, tool_input in calls]
-    controller_error = "" if (not requires_mutation or write_calls) else "controller blocked completion: required write action was not executed"
+    controller_error = "" if (not requires_mutation or write_calls) else (
+        "controller blocked completion: required write action was not executed"
+        if handoff_error is None else f"controller blocked completion: {handoff_error}"
+    )
     final_answer = verifier_answer or executor_answer or planner_answer
     correct = is_correct(predicted_actions, outcome, controller_error or ("" if final_answer.strip() else "empty final answer"))
     side_effects = has_side_effects(predicted_actions, correct)
@@ -282,11 +414,18 @@ def main() -> None:
         "status": status,
         "requires_mutation": requires_mutation,
         "official_score": {"correct": correct, "side_effect": side_effects},
-        "metrics": {**aggregate_metrics, "wall_latency_seconds": round(time.perf_counter() - started, 6)},
+        "metrics": {
+            **aggregate_metrics,
+            "wall_latency_seconds": round(time.perf_counter() - started, 6),
+            "token_budget": args.token_budget,
+            "max_tool_calls": args.max_tool_calls,
+            "max_latency_seconds": args.max_latency_seconds,
+        },
         "phases": phases,
         "tool_calls": len(calls),
         "write_actions": len(write_calls),
         "allowed_tools": len(task_tools),
+        "allow_write": allow_write,
         "actions": predicted_actions,
         "final_answer": final_answer,
     }

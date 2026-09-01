@@ -7,7 +7,9 @@ The first multi-agent layer turns one task into an inspectable execution graph. 
 ```text
 task
   ↓
-task morphology
+task-complexity router
+  ├─ simple → single-agent loop
+  └─ complex/uncertain → task morphology
   ↓
 role/dependency plan
   ↓
@@ -43,7 +45,7 @@ causally evidenced Candidate → Active → Disabled lesson ledger
 - Research: researcher → critic → synthesizer
 - Planning: decomposer → executor → reviewer → synthesizer
 - Other verifiable tasks: analyst → verifier → synthesizer
-- Simple tasks: executor → synthesizer
+- Simple tasks: single-agent loop; no multi-agent DAG overhead
 
 The planner records the task morphology and compatible Active lessons with every plan. The DAG compiler has final authority: it rejects duplicate IDs, unresolved dependencies, invalid output contracts, and cycles. The orchestrator executes the plan as a bounded DAG: all roles whose dependencies are complete form one parallel layer. Multi-agent runs also receive the conversation history. The next version can replace the deterministic planner with an LLM planner, but should keep the same `ArchitecturePlan` contract and benchmark it against this baseline.
 
@@ -72,6 +74,7 @@ Each multi-agent run records architecture, compilation, typed artifacts, causal 
 
 1. Replace the fallback scorer with deterministic task benchmarks and fixed seeds.
 2. Estimate uncertainty with repeated replays, rather than the current configurable penalty.
-3. Compare single-agent, fixed multi-agent and causally governed adaptive baselines.
+3. Compare S0, Complex-only, Adaptive, and Oracle routing; retain fixed multi-agent
+   and causal components as internal ablations.
 4. Add controlled task-family splits for drift-aware lesson transfer and negative-transfer measurement.
 5. Extend safe local edits beyond dependency removal while preserving compiler and permission gates.

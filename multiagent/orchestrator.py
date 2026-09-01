@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -54,11 +55,35 @@ class MultiAgentOrchestrator:
         self.budget_policy = budget_policy or BudgetPolicy()
         self.enable_evaluator = enable_evaluator
         self.budget_ledger = BudgetLedger(self.budget_policy.max_total_tokens)
+        self._resource_lock = threading.Lock()
+        self._resource_metrics: dict[str, Any] = {
+            "token_cost": 0,
+            "critical_path_latency": 0.0,
+            "tool_calls": 0,
+            "safety_incidents": 0,
+            "regression_risk": 0.0,
+        }
 
     def _record(self, event_type: str, **payload: Any) -> None:
         self.logger.emit(event_type, **payload)
         if self.emit:
             self.emit(event_type, payload)
+
+    def _record_resource_metrics(self, metrics: dict[str, Any]) -> None:
+        """Track every paid call for one shared execution budget."""
+        with self._resource_lock:
+            tokens = int(metrics.get("total_tokens", 0) or 0)
+            if not tokens:
+                tokens = int(metrics.get("prompt_tokens", 0) or 0) + int(metrics.get("completion_tokens", 0) or 0)
+            self._resource_metrics["token_cost"] += tokens
+            self._resource_metrics["critical_path_latency"] += float(metrics.get("latency_seconds", 0.0) or 0.0)
+            self._resource_metrics["tool_calls"] += int(metrics.get("tool_calls", 0) or 0)
+            self._resource_metrics["safety_incidents"] += int(metrics.get("safety_incidents", 0) or 0)
+            self._resource_metrics["regression_risk"] += float(metrics.get("regression_risk", 0.0) or 0.0)
+
+    def _resource_snapshot(self) -> dict[str, Any]:
+        with self._resource_lock:
+            return dict(self._resource_metrics)
 
     def _role_prompt(
         self,
@@ -104,15 +129,15 @@ class MultiAgentOrchestrator:
             "请只完成你的职责，明确事实、推断和不确定性；不要重复前序结果。"
         )
 
-    def _score(self, answer: str) -> float:
+    def _score(self, answer: str) -> float | None:
         if self.task_scorer is None:
-            return 1.0 if answer.strip() else 0.0
+            return None
         try:
             value = self.task_scorer(answer)
             return max(0.0, min(1.0, float(value)))
         except Exception as exc:  # noqa: BLE001 - scoring must not break a run
             self._record("scorer.error", error=str(exc))
-            return 0.0
+            return None
 
     @staticmethod
     def _answer_from_artifacts(plan: Any, artifacts: dict[str, AgentArtifact], results: list[AgentResult]) -> str:
@@ -170,6 +195,26 @@ class MultiAgentOrchestrator:
         masked_edges = masked_edges or set()
 
         while pending:
+            budget_ok, budget_reasons = budget_allows(self._resource_snapshot(), self.budget_policy)
+            if not budget_ok:
+                for role in list(pending.values()):
+                    artifact = build_artifact(role.agent_id, "", role.output_contract)
+                    result = AgentResult(
+                        role.agent_id,
+                        role.name,
+                        "",
+                        list(role.dependencies),
+                        False,
+                        "budget stopped before role execution",
+                        {"success": False, "budget_stopped": True, "budget_reasons": budget_reasons},
+                        None,
+                        artifact,
+                    )
+                    results.append(result)
+                    artifacts[role.agent_id] = artifact
+                    self._record(f"{event_prefix}agent.completed", agent=result.to_dict())
+                    pending.pop(role.agent_id, None)
+                break
             ready = [
                 role for role in pending.values()
                 if all(dependency in artifacts for dependency in role.dependencies)
@@ -185,7 +230,7 @@ class MultiAgentOrchestrator:
                         False,
                         "cyclic or unresolved dependency",
                         {"success": False},
-                        0.0,
+                        None,
                         artifact,
                     )
                     results.append(result)
@@ -203,13 +248,16 @@ class MultiAgentOrchestrator:
                     estimate = (len(prompt) + 2) // 3 + self.budget_policy.max_completion_tokens
                     if not self.budget_ledger.reserve(reservation_id, estimate):
                         artifact = build_artifact(role.agent_id, "", role.output_contract)
-                        return role, "", {"success": False, "budget_stopped": True}, 0.0, "global token budget reservation denied", artifact
+                        return role, "", {"success": False, "budget_stopped": True}, None, "global token budget reservation denied", artifact
                     raw = self.runner(
                         prompt,
                         f"{event_prefix}{role.agent_id}",
                     )
                     answer, metrics, task_success = _unpack_runner_output(raw)
-                    self.budget_ledger.settle(reservation_id, int(metrics.get("total_tokens", 0) or 0))
+                    actual_tokens = int(metrics.get("total_tokens", 0) or 0)
+                    if not actual_tokens:
+                        actual_tokens = int(metrics.get("prompt_tokens", 0) or 0) + int(metrics.get("completion_tokens", 0) or 0)
+                    self.budget_ledger.settle(reservation_id, actual_tokens)
                     metrics.setdefault("latency_seconds", round(time.perf_counter() - started, 6))
                     artifact = build_artifact(role.agent_id, answer, role.output_contract)
                     return role, answer, metrics, task_success, None, artifact
@@ -217,7 +265,7 @@ class MultiAgentOrchestrator:
                     if reservation_id is not None:
                         self.budget_ledger.settle(reservation_id, 0)
                     artifact = build_artifact(role.agent_id, "", role.output_contract)
-                    return role, "", {"success": False}, 0.0, str(exc), artifact
+                    return role, "", {"success": False}, None, str(exc), artifact
 
             with ThreadPoolExecutor(max_workers=min(self.max_parallelism, len(ready))) as pool:
                 futures = {pool.submit(execute, role): role for role in ready}
@@ -241,11 +289,39 @@ class MultiAgentOrchestrator:
                 result = layer_results[role.agent_id]
                 pending.pop(role.agent_id, None)
                 results.append(result)
+                self._record_resource_metrics(result.metrics)
                 artifacts[role.agent_id] = result.artifact or build_artifact(role.agent_id, "", role.output_contract)
                 self._record(f"{event_prefix}artifact.validated", artifact=artifacts[role.agent_id].to_dict(), target=role.agent_id)
                 self._record(f"{event_prefix}agent.completed", agent=result.to_dict())
 
         return artifacts, results
+
+    def _run_governed_auxiliary(self, prompt: str, agent_id: str) -> dict[str, Any]:
+        """Run evaluator/other auxiliary work through the same budget ledger."""
+        allowed, reasons = budget_allows(self._resource_snapshot(), self.budget_policy)
+        if not allowed:
+            return {"answer": "", "metrics": {"success": False, "budget_stopped": True, "budget_reasons": reasons}}
+
+        reservation_id = f"auxiliary:{agent_id}:{time.time_ns()}"
+        estimate = (len(prompt) + 2) // 3 + self.budget_policy.max_completion_tokens
+        if not self.budget_ledger.reserve(reservation_id, estimate):
+            return {"answer": "", "metrics": {"success": False, "budget_stopped": True, "budget_reasons": ["global token budget reservation denied"]}}
+        started = time.perf_counter()
+        try:
+            raw = self.runner(prompt, agent_id)
+            answer, metrics, task_success = _unpack_runner_output(raw)
+            actual_tokens = int(metrics.get("total_tokens", 0) or 0)
+            if not actual_tokens:
+                actual_tokens = int(metrics.get("prompt_tokens", 0) or 0) + int(metrics.get("completion_tokens", 0) or 0)
+            self.budget_ledger.settle(reservation_id, actual_tokens)
+            metrics.setdefault("latency_seconds", round(time.perf_counter() - started, 6))
+            self._record_resource_metrics(metrics)
+            return {"answer": answer, "metrics": metrics, "task_success": task_success}
+        except Exception as exc:  # noqa: BLE001
+            self.budget_ledger.settle(reservation_id, 0)
+            metrics = {"success": False, "latency_seconds": round(time.perf_counter() - started, 6), "error": str(exc)}
+            self._record_resource_metrics(metrics)
+            return {"answer": "", "metrics": metrics, "task_success": None}
 
     @staticmethod
     def _add_metrics(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
@@ -266,6 +342,7 @@ class MultiAgentOrchestrator:
         baseline_artifacts: dict[str, AgentArtifact],
         baseline_results: list[AgentResult],
         baseline_quality: float,
+        quality_available: bool,
         baseline_metrics: dict[str, Any],
         prior_lessons: list[dict[str, Any]],
         history: list[dict[str, str]] | None,
@@ -274,12 +351,23 @@ class MultiAgentOrchestrator:
         """Run bounded, fixed-context edge interventions and admit evidence."""
 
         baseline_utility = score_utility(baseline_quality, baseline_metrics, self.budget_policy)
-        cumulative_metrics = dict(baseline_metrics)
         audits: list[dict[str, Any]] = []
         admissions: list[dict[str, Any]] = []
         best_repair: dict[str, Any] | None = None
         by_id = {item.agent_id: item for item in baseline_results}
         baseline_budget_stopped = any(bool((item.metrics or {}).get("budget_stopped")) for item in baseline_results)
+
+        if not quality_available:
+            for edge in compiled["edges"][:self.budget_policy.max_causal_audits]:
+                audit = {
+                    "edge": edge,
+                    "status": "stopped",
+                    "reason": ["task scorer required for causal utility comparison"],
+                    "downstream": [],
+                }
+                audits.append(audit)
+                self._record("causal_audit.stopped", audit=audit)
+            return audits, None, admissions
 
         for edge in compiled["edges"][:self.budget_policy.max_causal_audits]:
             if baseline_budget_stopped:
@@ -289,7 +377,7 @@ class MultiAgentOrchestrator:
                 continue
             downstream = self._descendants(plan, edge["target"])
             estimated = aggregate_metrics(plan, [by_id[item] for item in downstream if item in by_id])
-            projected = self._add_metrics(cumulative_metrics, estimated)
+            projected = self._add_metrics(self._resource_snapshot(), estimated)
             allowed, reasons = budget_allows(projected, self.budget_policy)
             if not allowed:
                 audit = {"edge": edge, "status": "stopped", "reason": reasons, "downstream": sorted(downstream)}
@@ -312,8 +400,12 @@ class MultiAgentOrchestrator:
             replay_answer = self._answer_from_artifacts(plan, replay_artifacts, replay_results)
             replay_quality = self._score(replay_answer)
             replay_metrics = aggregate_metrics(plan, replay_results, time.perf_counter() - started)
-            cumulative_metrics = self._add_metrics(cumulative_metrics, replay_metrics)
-            intervention_utility = score_utility(replay_quality, replay_metrics, self.budget_policy)
+            combined_results = [
+                *[item for item in baseline_results if item.agent_id not in downstream],
+                *replay_results,
+            ]
+            intervention_metrics = aggregate_metrics(plan, combined_results, time.perf_counter() - started)
+            intervention_utility = score_utility(replay_quality, intervention_metrics, self.budget_policy)
             edge_effect = baseline_utility.value - intervention_utility.value
             removal_gain = intervention_utility.value - baseline_utility.value
             confidence = abs(removal_gain) - self.budget_policy.uncertainty_penalty
@@ -327,6 +419,7 @@ class MultiAgentOrchestrator:
                 "removal_utility_gain": round(removal_gain, 6),
                 "absolute_effect_lower_bound": round(confidence, 6),
                 "replay_metrics": replay_metrics,
+                "intervention_metrics": intervention_metrics,
             }
             audits.append(audit)
             self._record("causal_audit.completed", audit=audit)
@@ -403,11 +496,34 @@ class MultiAgentOrchestrator:
         baseline_elapsed = time.perf_counter() - baseline_started
         baseline_answer = self._answer_from_artifacts(plan, artifacts, results)
         baseline_score = self._score(baseline_answer)
+        quality_available = baseline_score is not None
+        baseline_quality = baseline_score if baseline_score is not None else 0.0
+        quality_source = "task_scorer" if quality_available else "unscored"
         baseline_metrics = aggregate_metrics(plan, results, baseline_elapsed)
-        baseline_utility = score_utility(baseline_score, baseline_metrics, self.budget_policy)
+        baseline_utility = score_utility(baseline_quality, baseline_metrics, self.budget_policy)
 
         ablation_results: list[dict[str, Any]] = []
         for agent_id in (role.agent_id for role in plan.roles):
+            if not quality_available:
+                ablation_results.append({
+                    "agent_id": agent_id,
+                    "status": "skipped",
+                    "reason": ["task scorer required for ablation performance comparison"],
+                    "quality_source": quality_source,
+                    "baseline_task_success": None,
+                    "ablated_task_success": None,
+                    "performance_delta": None,
+                })
+                continue
+            allowed, reasons = budget_allows(self._resource_snapshot(), self.budget_policy)
+            if not allowed:
+                ablation_results.append({
+                    "agent_id": agent_id,
+                    "status": "stopped",
+                    "reason": reasons,
+                    "baseline_task_success": baseline_score,
+                })
+                break
             ablated_artifacts, ablated_agents = self._execute_plan(
                 task,
                 morphology,
@@ -437,7 +553,8 @@ class MultiAgentOrchestrator:
             compiled,
             artifacts,
             results,
-            baseline_score,
+            baseline_quality,
+            quality_available,
             baseline_metrics,
             active_lessons,
             history,
@@ -469,12 +586,20 @@ class MultiAgentOrchestrator:
         report.utility = {
             "baseline": baseline_utility.to_dict(),
             "final": final_utility.to_dict(),
+            "quality_source": quality_source,
             "budget_policy": self.budget_policy.to_dict(),
         }
+        auxiliary_metrics: dict[str, Any] = {}
         if self.enable_evaluator:
-            report = enrich_with_evaluator_agent(report, plan, results, self.runner)
+            def governed_evaluator(prompt: str, agent_id: str) -> dict[str, Any]:
+                output = self._run_governed_auxiliary(prompt, agent_id)
+                auxiliary_metrics[agent_id] = output.get("metrics", {})
+                return output
+
+            report = enrich_with_evaluator_agent(report, plan, results, governed_evaluator)
         else:
             report.evaluator_source = "disabled_by_budget_policy"
+        report.auxiliary_metrics = auxiliary_metrics
         self._record("contribution.evaluated", report=report.to_dict())
         adjustment = propose_adjustment(plan, report, morphology.complexity)
         self._record("architecture.adjusted", proposal=adjustment)

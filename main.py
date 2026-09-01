@@ -13,6 +13,7 @@ from state.events import EventLogger
 from llm.client import PROVIDER_DEFAULTS, build_client
 from state.store import RunStore
 from multiagent.orchestrator import MultiAgentOrchestrator
+from multiagent.models import BudgetPolicy
 
 
 _PROVIDER_CHOICES = sorted(PROVIDER_DEFAULTS.keys())
@@ -103,6 +104,8 @@ def main() -> None:
                     adapter=client.adapter,
                     metrics=role_metrics,
                     max_read_bytes=settings.max_read_bytes,
+                    max_tool_calls=settings.max_tool_calls,
+                    allow_write=settings.allow_write,
                 )
                 return {"answer": answer, "metrics": role_metrics}
 
@@ -111,6 +114,13 @@ def main() -> None:
                 data_dir=settings.data_dir,
                 logger=logger,
                 max_parallelism=settings.max_parallel_agents,
+                budget_policy=BudgetPolicy(
+                    max_total_tokens=settings.max_total_tokens,
+                    max_latency_seconds=settings.max_latency_seconds,
+                    max_tool_calls=settings.max_tool_calls,
+                    max_causal_audits=settings.max_causal_audits,
+                    allow_write=settings.allow_write,
+                ),
             ).run(args.task, source_run=run_id)
             answer = multi_result["answer"]
         else:
@@ -127,6 +137,10 @@ def main() -> None:
                 adapter=client.adapter,
                 metrics=run_metrics,
                 max_read_bytes=settings.max_read_bytes,
+                max_tool_calls=settings.max_tool_calls,
+                max_total_tokens=settings.max_total_tokens,
+                max_latency_seconds=settings.max_latency_seconds,
+                allow_write=settings.allow_write,
             )
         result = {
             "run_id": run_id,

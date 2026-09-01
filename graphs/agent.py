@@ -29,6 +29,9 @@ def run_agent(
     max_read_bytes: int = 100_000,
     allowed_tool_names: set[str] | None = None,
     max_tool_calls: int | None = None,
+    max_total_tokens: int | None = None,
+    max_latency_seconds: float | None = None,
+    allow_write: bool = False,
 ) -> str:
     """Run the agent loop. Returns the final assistant answer text.
 
@@ -41,6 +44,7 @@ def run_agent(
         "data_dir": Path(data_dir),
         "workspace_root": Path(workspace_root),
         "max_read_bytes": max_read_bytes,
+        "allow_write": allow_write,
     }
     convo = _build_conversation(messages, ctx["data_dir"], history=history)
     return run_loop(
@@ -55,4 +59,6 @@ def run_agent(
         metrics=metrics,
         allowed_tool_names=allowed_tool_names,
         max_tool_calls=max_tool_calls,
+        max_total_tokens=max_total_tokens,
+        max_latency_seconds=max_latency_seconds,
     )

@@ -15,6 +15,13 @@ serve.log
 serve.err
 .metamorph_serve.*
 
+# Downloaded benchmark repositories, datasets, environments, and run outputs
+benchmarks/browsecomp-plus/
+benchmarks/tau2-bench/
+benchmarks/tau3-bench/
+benchmarks/workbench/
+benchmarks/*.tar.gz
+
 # Secrets / local data
 .env
 .env.*

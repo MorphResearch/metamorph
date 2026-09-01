@@ -20,12 +20,14 @@ from llm.client import build_client
 from state.store import RunStore
 from multiagent.evaluator import deterministic_report, propose_adjustment
 from multiagent.morphology import classify_task
+from multiagent.routing import heuristic_route, load_oracle_labels, task_features
 from multiagent.orchestrator import MultiAgentOrchestrator
 from multiagent.models import AgentRole, ArchitecturePlan, BudgetPolicy
 from multiagent.contracts import compile_plan
 from multiagent.lessons import LessonStore
 from api.middleware import safe_workspace_id
 from tools.web import _validate_fetch_url
+from multiagent.utility import aggregate_metrics
 
 
 class ToolRegistryTests(unittest.TestCase):
@@ -47,17 +49,17 @@ class MemoryToolTests(unittest.TestCase):
     def test_memory_persists_and_updates(self):
         with tempfile.TemporaryDirectory() as d:
             data_dir = Path(d)
-            update_user_memory("create", data_dir, "user", "喜欢用简体中文")
-            update_user_memory("create", data_dir, "project", "在做通用 agent")
+            update_user_memory("create", data_dir, "user", "喜欢用简体中文", allow_write=True)
+            update_user_memory("create", data_dir, "project", "在做通用 agent", allow_write=True)
             mem = read_user_memories(data_dir)
             self.assertIn("user", mem)
             self.assertIn("project", mem)
             # update appends under the same type
-            update_user_memory("update", data_dir, "user", "追加偏好")
+            update_user_memory("update", data_dir, "user", "追加偏好", allow_write=True)
             mem = read_user_memories(data_dir)
             self.assertEqual(len(mem["user"]), 2)
             # delete clears the type
-            update_user_memory("delete", data_dir, "user")
+            update_user_memory("delete", data_dir, "user", allow_write=True)
             mem = read_user_memories(data_dir)
             self.assertNotIn("user", mem)
 
@@ -67,9 +69,14 @@ class MemoryToolTests(unittest.TestCase):
             workspace = data_dir / "workspace"
             workspace.mkdir()
             (workspace / "note.txt").write_text("hello", encoding="utf-8")
-            ctx = {"data_dir": data_dir, "workspace_root": workspace, "max_read_bytes": 100}
+            ctx = {"data_dir": data_dir, "workspace_root": workspace, "max_read_bytes": 100, "allow_write": True}
             self.assertEqual(dispatch("read_document", {"path": "note.txt"}, ctx), "hello")
             self.assertIn("已新增", dispatch("update_user_memory", {"mode": "create", "content": "x"}, ctx))
+
+    def test_write_tools_are_denied_without_write_policy(self):
+        with tempfile.TemporaryDirectory() as d:
+            result = dispatch("update_user_memory", {"mode": "create", "content": "x"}, {"data_dir": Path(d)})
+            self.assertTrue(result.startswith("工具执行被拒绝："))
 
 
 class ConfigTests(unittest.TestCase):
@@ -144,6 +151,19 @@ class StoreTests(unittest.TestCase):
 
 
 class MultiAgentTests(unittest.TestCase):
+    def test_routing_features_do_not_depend_on_gold_outcome(self):
+        features = task_features("If the first meeting is cancelled, move all related tasks", domain_count=2)
+        self.assertTrue(features["has_condition"])
+        self.assertEqual(features["domain_count"], 2)
+        route, _ = heuristic_route("If the first meeting is cancelled, move all related tasks", domain_count=2)
+        self.assertEqual(route, "complex")
+
+    def test_oracle_labels_are_strict(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "labels.json"
+            path.write_text('{"labels":{"calendar:0":"simple"}}', encoding="utf-8")
+            self.assertEqual(load_oracle_labels(path)["calendar:0"], "simple")
+
     def test_morphology_selects_coding_structure(self):
         morphology = classify_task("分析这个 Python 项目并增加测试，然后检查错误")
         self.assertEqual(morphology.task_kind, "coding")
@@ -163,6 +183,16 @@ class MultiAgentTests(unittest.TestCase):
         self.assertEqual(len(report.agents), 2)
         adjustment = propose_adjustment(plan, report, "medium")
         self.assertTrue(adjustment["requires_human_approval"])
+
+    def test_task_success_is_unknown_without_task_scorer(self):
+        from multiagent.models import AgentResult
+
+        report = deterministic_report(
+            ArchitecturePlan("test", [], [AgentRole("a", "A", "", "")]),
+            [AgentResult("a", "A", "non-empty answer")],
+        )
+        self.assertIsNone(report.task_success_rate)
+        self.assertIsNone(report.agents[0].task_success_rate)
 
     def test_orchestrator_records_lessons_and_returns_evaluation(self):
         with tempfile.TemporaryDirectory() as d:
@@ -218,6 +248,10 @@ class MultiAgentTests(unittest.TestCase):
             second = orchestrator.run("研究一个问题", source_run="run-2")
             self.assertTrue(any("typed-null-artifact" in prompt for prompt in prompts))
             self.assertEqual(first["causal_audits"][0]["status"], "completed")
+            self.assertGreater(
+                first["causal_audits"][0]["intervention_metrics"]["token_cost"],
+                first["causal_audits"][0]["replay_metrics"]["token_cost"],
+            )
             lessons = LessonStore(Path(d)).all()
             self.assertEqual(len(lessons), 1)
             self.assertEqual(lessons[0]["status"], "Active")
@@ -263,6 +297,23 @@ class MultiAgentTests(unittest.TestCase):
             self.assertEqual(report["token_cost"], 30)
             self.assertEqual(report["tool_calls"], 6)
             self.assertIn("ablation_performance_delta", report["agents"][0])
+
+    def test_unscored_run_does_not_claim_task_success(self):
+        with tempfile.TemporaryDirectory() as d:
+            class Logger:
+                def emit(self, event_type, **payload):
+                    pass
+
+            result = MultiAgentOrchestrator(
+                lambda prompt, agent_id: {"answer": "non-empty", "metrics": {"total_tokens": 1}},
+                Path(d),
+                Logger(),
+                enable_evaluator=False,
+            ).run("研究一个问题")
+            report = result["contribution_report"]
+            self.assertIsNone(report["task_success_rate"])
+            self.assertEqual(report["utility"]["quality_source"], "unscored")
+            self.assertTrue(all(item["status"] == "skipped" for item in report["ablation_results"]))
 
     def test_multiagent_role_prompt_includes_conversation_history(self):
         with tempfile.TemporaryDirectory() as d:
@@ -329,6 +380,19 @@ class MultiAgentTests(unittest.TestCase):
             _, results = orchestrator._execute_plan("task", morphology, plan, [], None)
             self.assertEqual([item.agent_id for item in results], ["a", "b", "c"])
             self.assertEqual(peak, 2)
+
+    def test_critical_path_is_independent_of_role_list_order(self):
+        from multiagent.models import AgentResult, AgentRole, ArchitecturePlan
+
+        plan = ArchitecturePlan("ordered", [], [
+            AgentRole("b", "B", "", "", ["a"]),
+            AgentRole("a", "A", "", ""),
+        ])
+        metrics = aggregate_metrics(plan, [
+            AgentResult("a", "A", "a", metrics={"latency_seconds": 1.0}),
+            AgentResult("b", "B", "b", ["a"], metrics={"latency_seconds": 2.0}),
+        ])
+        self.assertEqual(metrics["critical_path_latency"], 3.0)
 
 
 class ExecutorLoopTests(unittest.TestCase):
@@ -409,6 +473,63 @@ class ExecutorLoopTests(unittest.TestCase):
             self.assertIn("tool.completed", types)
             self.assertEqual(types.count("model.decision"), 2)
             self.assertEqual(answer, "final answer")
+
+    def test_non_streaming_fallback_preserves_tool_allowlist(self):
+        from llm.adapters import AdapterResponse
+
+        with tempfile.TemporaryDirectory() as d:
+            seen = []
+
+            class FallbackAdapter:
+                def stream(self, **kwargs):
+                    raise TypeError("stream unavailable")
+
+                def complete(self, **kwargs):
+                    seen.extend(item["function"]["name"] for item in kwargs["tools"])
+                    return AdapterResponse(content="fallback answer")
+
+            answer = run_agent(
+                client=object(),
+                model_name="fake",
+                messages=[{"role": "user", "content": "hi"}],
+                logger=EventLogger(Path(d) / "run"),
+                data_dir=Path(d),
+                workspace_root=Path("."),
+                max_turns=1,
+                adapter=FallbackAdapter(),
+                allowed_tool_names={"web_search"},
+            )
+            self.assertEqual(answer, "fallback answer")
+            self.assertEqual(seen, ["web_search"])
+
+    def test_fallback_does_not_reopen_tools_after_tool_budget(self):
+        from llm.adapters import AdapterResponse
+
+        with tempfile.TemporaryDirectory() as d:
+            seen = []
+
+            class FallbackAdapter:
+                def stream(self, **kwargs):
+                    raise TypeError("stream unavailable")
+
+                def complete(self, **kwargs):
+                    seen.append(kwargs["tools"])
+                    return AdapterResponse(content="budget exhausted")
+
+            answer = run_agent(
+                client=object(),
+                model_name="fake",
+                messages=[{"role": "user", "content": "hi"}],
+                logger=EventLogger(Path(d) / "run"),
+                data_dir=Path(d),
+                workspace_root=Path("."),
+                max_turns=1,
+                adapter=FallbackAdapter(),
+                allowed_tool_names={"web_search"},
+                max_tool_calls=0,
+            )
+            self.assertEqual(answer, "budget exhausted")
+            self.assertEqual(seen, [[]])
 
 
 if __name__ == "__main__":

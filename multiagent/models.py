@@ -142,6 +142,7 @@ class ContributionReport:
     ablation_results: list[dict[str, Any]] = field(default_factory=list)
     causal_audits: list[dict[str, Any]] = field(default_factory=list)
     utility: dict[str, Any] = field(default_factory=dict)
+    auxiliary_metrics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,6 +157,7 @@ class ContributionReport:
             "ablation_results": self.ablation_results,
             "causal_audits": self.causal_audits,
             "utility": self.utility,
+            "auxiliary_metrics": self.auxiliary_metrics,
         }
 
 
@@ -190,6 +192,7 @@ class BudgetPolicy:
     regression_weight: float = 1.0
     uncertainty_penalty: float = 0.05
     min_utility_lower_bound: float = 0.0
+    allow_write: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

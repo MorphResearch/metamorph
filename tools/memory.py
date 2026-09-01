@@ -42,8 +42,11 @@ def update_user_memory(
     data_dir: Path,
     type: str = "user",
     content: str = "",
+    allow_write: bool = False,
 ) -> str:
     """Persist long-term memory to a local JSONL file (cross-session)."""
+    if not allow_write:
+        return "记忆写入被拒绝：当前执行策略未开启写权限。"
     with _MEMORY_LOCK:
         if mode == "delete":
             _overwrite_memory_type(data_dir, type, [])
@@ -63,4 +66,11 @@ def update_user_memory(
         return "mode 必须是 create/update/delete。"
 
 
-register("update_user_memory", UpdateUserMemoryInput, update_user_memory, pass_ctx=True, ctx_keys=("data_dir",))
+register(
+    "update_user_memory",
+    UpdateUserMemoryInput,
+    update_user_memory,
+    pass_ctx=True,
+    ctx_keys=("data_dir", "allow_write"),
+    mutates=True,
+)

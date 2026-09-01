@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "label_definition": {
+    "simple": "one direct operation with no conditional or bulk dependency",
+    "complex": "conditional, ordered, multi-record, multi-domain, multi-turn, or recovery-sensitive task"
+  },
+  "labels": {
+    "calendar:0": "complex",
+    "customer_relationship_manager:0": "simple",
+    "project_management:0": "complex",
+    "mock:create_task_1": "simple"
+  }
+}

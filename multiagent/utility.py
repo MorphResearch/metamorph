@@ -46,12 +46,30 @@ def aggregate_metrics(
     """Measure resource use; latency is the DAG critical path, not summed work."""
 
     by_id = {item.agent_id: item for item in results}
+    role_by_id = {role.agent_id: role for role in plan.roles}
     critical: dict[str, float] = {}
-    for role in plan.roles:
-        result = by_id.get(role.agent_id)
+
+    def path_latency(agent_id: str, visiting: set[str] | None = None) -> float:
+        if agent_id in critical:
+            return critical[agent_id]
+        visiting = visiting or set()
+        if agent_id in visiting:
+            # Invalid cycles are rejected by the compiler; keep this helper
+            # total so diagnostics can still be produced for an uncompiled plan.
+            return 0.0
+        visiting.add(agent_id)
+        role = role_by_id.get(agent_id)
+        result = by_id.get(agent_id)
         duration = float((result.metrics if result else {}).get("latency_seconds", 0.0) or 0.0)
-        dependency_time = max((critical.get(dep, 0.0) for dep in role.dependencies), default=0.0)
-        critical[role.agent_id] = dependency_time + duration
+        dependency_time = max(
+            (path_latency(dep, visiting.copy()) for dep in (role.dependencies if role else [])),
+            default=0.0,
+        )
+        critical[agent_id] = dependency_time + duration
+        return critical[agent_id]
+
+    for role in plan.roles:
+        path_latency(role.agent_id)
     path_latency = max(critical.values(), default=0.0)
     if path_latency <= 0.0:
         path_latency = max(0.0, fallback_latency)

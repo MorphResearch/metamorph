@@ -16,6 +16,7 @@ def register(
     fn: Callable,
     pass_ctx: bool = False,
     ctx_keys: tuple[str, ...] = (),
+    mutates: bool = False,
 ) -> None:
     """Register a tool and the exact runtime context keys it may receive."""
     TOOL_REGISTRY[name] = {
@@ -23,6 +24,7 @@ def register(
         "fn": fn,
         "pass_ctx": pass_ctx,
         "ctx_keys": ctx_keys,
+        "mutates": mutates,
     }
 
 
@@ -73,6 +75,8 @@ def dispatch(name: str, arguments: dict[str, Any], ctx: dict[str, Any], allowed_
         return f"参数校验失败：{exc}"
     kwargs = validated.model_dump()
     try:
+        if meta.get("mutates") and not bool(ctx.get("allow_write", False)):
+            return "工具执行被拒绝：当前执行策略不允许写入。"
         if meta["pass_ctx"]:
             scoped_ctx = {key: ctx[key] for key in meta["ctx_keys"] if key in ctx}
             return str(meta["fn"](**kwargs, **scoped_ctx))

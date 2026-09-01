@@ -189,6 +189,8 @@ def run_one(
     max_causal_audits: int,
     token_budget: int,
     max_completion_tokens: int,
+    max_tool_calls: int,
+    max_latency_seconds: float,
 ) -> dict[str, Any]:
     query_id = str(query["query_id"])
     client = build_client(settings.provider, settings.model_name, settings.base_url, settings.api_key_env)
@@ -226,6 +228,8 @@ def run_one(
     policy = BudgetPolicy(
         max_causal_audits=max_causal_audits,
         max_total_tokens=token_budget,
+        max_tool_calls=max_tool_calls,
+        max_latency_seconds=max_latency_seconds,
         max_completion_tokens=max_completion_tokens,
     )
     with isolated_benchmark_tool(searcher):
@@ -265,6 +269,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--max-causal-audits", type=int, default=1)
     parser.add_argument("--token-budget", type=int, default=80_000)
+    parser.add_argument("--max-tool-calls", type=int, default=24)
+    parser.add_argument("--max-latency-seconds", type=float, default=300.0)
     parser.add_argument("--max-completion-tokens", type=int, default=2_048)
     parser.add_argument("--rebuild-index", action="store_true")
     return parser.parse_args()
@@ -297,6 +303,8 @@ def main() -> None:
             max_causal_audits=args.max_causal_audits,
             token_budget=args.token_budget,
             max_completion_tokens=args.max_completion_tokens,
+            max_tool_calls=args.max_tool_calls,
+            max_latency_seconds=args.max_latency_seconds,
         )
         output_path = run_root / f"{output['query_id']}.json"
         output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
