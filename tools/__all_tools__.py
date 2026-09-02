@@ -11,7 +11,9 @@ from __future__ import annotations
 ALL_TOOLS: list[str] = [
     "web_search",
     "web_fetch",
+    "list_files",
     "read_document",
+    "write_file",
     "update_user_memory",
 ]
 
@@ -30,6 +32,16 @@ TOOL_META: dict[str, dict[str, str]] = {
     "read_document": {
         "display_name": "读取文档",
         "example_prompt": "读取工作区中的报告.pdf",
+        "category": "document",
+    },
+    "list_files": {
+        "display_name": "列出文件",
+        "example_prompt": "检查当前工作区并总结文件结构",
+        "category": "document",
+    },
+    "write_file": {
+        "display_name": "写入文件",
+        "example_prompt": "把整理好的要点写入 工作区/summary.md",
         "category": "document",
     },
     "update_user_memory": {

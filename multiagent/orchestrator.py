@@ -44,11 +44,13 @@ class MultiAgentOrchestrator:
         max_parallelism: int = 8,
         budget_policy: BudgetPolicy | None = None,
         enable_evaluator: bool = True,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         self.runner = runner
         self.data_dir = Path(data_dir)
         self.logger = logger
         self.emit = emit
+        self.should_stop = should_stop
         self.lessons = LessonStore(self.data_dir)
         self.task_scorer = task_scorer
         self.max_parallelism = max(1, max_parallelism)
@@ -68,6 +70,39 @@ class MultiAgentOrchestrator:
         self.logger.emit(event_type, **payload)
         if self.emit:
             self.emit(event_type, payload)
+
+    def _cancelled(self) -> bool:
+        """协作式取消：外部（UI 停止按钮）置位后各阶段尽快收敛。"""
+        return self.should_stop is not None and self.should_stop()
+
+    def _drain_pending(
+        self,
+        pending: dict[str, Any],
+        results: list[AgentResult],
+        artifacts: dict[str, AgentArtifact],
+        reason: str,
+        metadata: dict[str, Any],
+        event_prefix: str = "",
+    ) -> None:
+        """把尚未执行的 role 全部标记为未执行（保留可诊断性）并清空队列。"""
+        for role in list(pending.values()):
+            artifact = build_artifact(role.agent_id, "", role.output_contract)
+            is_cancelled = bool(metadata.get("cancelled"))
+            result = AgentResult(
+                role.agent_id,
+                role.name,
+                "",
+                list(role.dependencies),
+                not is_cancelled,  # 取消不是失败，success=True 避免前端显示"角色执行失败"
+                None if is_cancelled else reason,
+                metadata,
+                None,
+                artifact,
+            )
+            results.append(result)
+            artifacts[role.agent_id] = artifact
+            self._record(f"{event_prefix}agent.completed", agent=result.to_dict())
+            pending.pop(role.agent_id, None)
 
     def _record_resource_metrics(self, metrics: dict[str, Any]) -> None:
         """Track every paid call for one shared execution budget."""
@@ -195,25 +230,12 @@ class MultiAgentOrchestrator:
         masked_edges = masked_edges or set()
 
         while pending:
+            if self._cancelled():
+                self._drain_pending(pending, results, artifacts, "cancelled by user", {"success": False, "cancelled": True}, event_prefix)
+                break
             budget_ok, budget_reasons = budget_allows(self._resource_snapshot(), self.budget_policy)
             if not budget_ok:
-                for role in list(pending.values()):
-                    artifact = build_artifact(role.agent_id, "", role.output_contract)
-                    result = AgentResult(
-                        role.agent_id,
-                        role.name,
-                        "",
-                        list(role.dependencies),
-                        False,
-                        "budget stopped before role execution",
-                        {"success": False, "budget_stopped": True, "budget_reasons": budget_reasons},
-                        None,
-                        artifact,
-                    )
-                    results.append(result)
-                    artifacts[role.agent_id] = artifact
-                    self._record(f"{event_prefix}agent.completed", agent=result.to_dict())
-                    pending.pop(role.agent_id, None)
+                self._drain_pending(pending, results, artifacts, "budget stopped before role execution", {"success": False, "budget_stopped": True, "budget_reasons": budget_reasons}, event_prefix)
                 break
             ready = [
                 role for role in pending.values()
@@ -272,6 +294,11 @@ class MultiAgentOrchestrator:
                 layer_results: dict[str, AgentResult] = {}
                 for future in as_completed(futures):
                     role, answer, metrics, task_success, error, artifact = future.result()
+                    # 执行期间用户已取消：不标记为失败，标记为已取消
+                    if self._cancelled():
+                        metrics = dict(metrics)
+                        metrics["cancelled"] = True
+                        error = None
                     result = AgentResult(
                         role.agent_id,
                         role.name,
@@ -503,63 +530,67 @@ class MultiAgentOrchestrator:
         baseline_utility = score_utility(baseline_quality, baseline_metrics, self.budget_policy)
 
         ablation_results: list[dict[str, Any]] = []
-        for agent_id in (role.agent_id for role in plan.roles):
-            if not quality_available:
+        if not self._cancelled():  # 用户已取消：跳过全部消融回放，不再产生新的 LLM 调用
+            for agent_id in (role.agent_id for role in plan.roles):
+                if not quality_available:
+                    ablation_results.append({
+                        "agent_id": agent_id,
+                        "status": "skipped",
+                        "reason": ["task scorer required for ablation performance comparison"],
+                        "quality_source": quality_source,
+                        "baseline_task_success": None,
+                        "ablated_task_success": None,
+                        "performance_delta": None,
+                    })
+                    continue
+                allowed, reasons = budget_allows(self._resource_snapshot(), self.budget_policy)
+                if not allowed:
+                    ablation_results.append({
+                        "agent_id": agent_id,
+                        "status": "stopped",
+                        "reason": reasons,
+                        "baseline_task_success": baseline_score,
+                    })
+                    break
+                ablated_artifacts, ablated_agents = self._execute_plan(
+                    task,
+                    morphology,
+                    plan,
+                    active_lessons,
+                    history,
+                    excluded_agent=agent_id,
+                    event_prefix=f"ablation_without_{agent_id}.",
+                )
+                ablated_answer = self._answer_from_artifacts(plan, ablated_artifacts, ablated_agents)
+                ablated_score = self._score(ablated_answer)
+                ablated_metrics = aggregate_metrics(plan, ablated_agents)
                 ablation_results.append({
                     "agent_id": agent_id,
-                    "status": "skipped",
-                    "reason": ["task scorer required for ablation performance comparison"],
-                    "quality_source": quality_source,
-                    "baseline_task_success": None,
-                    "ablated_task_success": None,
-                    "performance_delta": None,
-                })
-                continue
-            allowed, reasons = budget_allows(self._resource_snapshot(), self.budget_policy)
-            if not allowed:
-                ablation_results.append({
-                    "agent_id": agent_id,
-                    "status": "stopped",
-                    "reason": reasons,
                     "baseline_task_success": baseline_score,
+                    "ablated_task_success": ablated_score,
+                    "performance_delta": round(ablated_score - baseline_score, 3),
+                    "ablated_token_cost": ablated_metrics["token_cost"],
+                    "ablated_latency_seconds": ablated_metrics["critical_path_latency"],
+                    "ablated_tool_calls": ablated_metrics["tool_calls"],
                 })
-                break
-            ablated_artifacts, ablated_agents = self._execute_plan(
+
+        if self._cancelled():  # 用户已取消：跳过边审计与修复回放
+            audits, repair, admissions = [], None, []
+        else:
+            audits, repair, admissions = self._audit_edges(
                 task,
                 morphology,
                 plan,
+                compiled,
+                artifacts,
+                results,
+                baseline_quality,
+                quality_available,
+                baseline_metrics,
                 active_lessons,
                 history,
-                excluded_agent=agent_id,
-                event_prefix=f"ablation_without_{agent_id}.",
+                source_run,
             )
-            ablated_answer = self._answer_from_artifacts(plan, ablated_artifacts, ablated_agents)
-            ablated_score = self._score(ablated_answer)
-            ablated_metrics = aggregate_metrics(plan, ablated_agents)
-            ablation_results.append({
-                "agent_id": agent_id,
-                "baseline_task_success": baseline_score,
-                "ablated_task_success": ablated_score,
-                "performance_delta": round(ablated_score - baseline_score, 3),
-                "ablated_token_cost": ablated_metrics["token_cost"],
-                "ablated_latency_seconds": ablated_metrics["critical_path_latency"],
-                "ablated_tool_calls": ablated_metrics["tool_calls"],
-            })
-
-        audits, repair, admissions = self._audit_edges(
-            task,
-            morphology,
-            plan,
-            compiled,
-            artifacts,
-            results,
-            baseline_quality,
-            quality_available,
-            baseline_metrics,
-            active_lessons,
-            history,
-            source_run,
-        )
         final_artifacts = repair["outputs"] if repair else artifacts
         final_results = repair["results"] if repair else results
         final_answer = self._answer_from_artifacts(plan, final_artifacts, final_results)
@@ -590,7 +621,7 @@ class MultiAgentOrchestrator:
             "budget_policy": self.budget_policy.to_dict(),
         }
         auxiliary_metrics: dict[str, Any] = {}
-        if self.enable_evaluator:
+        if self.enable_evaluator and not self._cancelled():  # 取消后不再调用评估 Agent
             def governed_evaluator(prompt: str, agent_id: str) -> dict[str, Any]:
                 output = self._run_governed_auxiliary(prompt, agent_id)
                 auxiliary_metrics[agent_id] = output.get("metrics", {})

@@ -87,12 +87,12 @@ class _RouteHandler(BaseHTTPRequestHandler):
 
         # /v1/tasks/{id}/cancel — 停止运行中的任务
         parts = path.split("/")
-        if len(parts) == 5 and parts[1:4] == ["v1", "tasks"] and parts[4] == "cancel":
+        if len(parts) == 5 and parts[1:3] == ["v1", "tasks"] and parts[4] == "cancel":
             accepted = self.worker.cancel(parts[3])
             if accepted:
                 json_response(self, 202, {"run_id": parts[3], "status": "cancelling"})
             else:
-                json_response(self, 404, {"error": "run not found or already finished"})
+                json_response(self, 404, {"error": "run not found"})
             return
 
         if path != "/v1/tasks" and path != "/v1/uploads":

@@ -8,6 +8,7 @@ individual modules per tool family.
 
 from .base import TOOL_REGISTRY, dispatch, get_registered_tools, tool_schemas
 from .document import read_document
+from .fileops import list_files, write_file
 from .memory import update_user_memory, read_user_memories
 from .tasklist import update_task_list
 from .utils import process_tool_result
@@ -17,6 +18,7 @@ __all__ = [
     "TOOL_REGISTRY",
     "dispatch",
     "get_registered_tools",
+    "list_files",
     "process_tool_result",
     "read_document",
     "read_user_memories",
@@ -25,4 +27,5 @@ __all__ = [
     "update_user_memory",
     "web_fetch",
     "web_search",
+    "write_file",
 ]

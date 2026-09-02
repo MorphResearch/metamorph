@@ -35,7 +35,7 @@ class ToolRegistryTests(unittest.TestCase):
         names = set(get_registered_tools())
         self.assertEqual(
             names,
-            {"web_search", "web_fetch", "read_document", "update_user_memory"},
+            {"web_search", "web_fetch", "list_files", "read_document", "write_file", "update_user_memory", "update_task_list"},
         )
 
     def test_tool_schemas_are_well_formed(self):
@@ -77,6 +77,87 @@ class MemoryToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             result = dispatch("update_user_memory", {"mode": "create", "content": "x"}, {"data_dir": Path(d)})
             self.assertTrue(result.startswith("工具执行被拒绝："))
+
+
+class WriteFileToolTests(unittest.TestCase):
+    def test_write_file_creates_dirs_and_content(self):
+        with tempfile.TemporaryDirectory() as d:
+            workspace = Path(d)
+            ctx = {"workspace_root": workspace, "allow_write": True}
+            result = dispatch(
+                "write_file",
+                {"path": "reports/sub/summary.md", "content": "# 摘要\n内容"},
+                ctx,
+            )
+            self.assertIn("已写入", result)
+            target = workspace / "reports" / "sub" / "summary.md"
+            self.assertEqual(target.read_text(encoding="utf-8"), "# 摘要\n内容")
+
+    def test_write_file_denied_without_write_policy(self):
+        with tempfile.TemporaryDirectory() as d:
+            ctx = {"workspace_root": Path(d)}
+            result = dispatch("write_file", {"path": "a.txt", "content": "x"}, ctx)
+            self.assertTrue(result.startswith("工具执行被拒绝："))
+
+    def test_write_file_rejects_workspace_escape(self):
+        with tempfile.TemporaryDirectory() as d:
+            workspace = Path(d) / "ws"
+            workspace.mkdir()
+            ctx = {"workspace_root": workspace, "allow_write": True}
+            result = dispatch("write_file", {"path": "../escape.txt", "content": "x"}, ctx)
+            self.assertIn("不允许访问工作区之外的路径", result)
+            self.assertFalse((Path(d) / "escape.txt").exists())
+
+
+class ListFilesToolTests(unittest.TestCase):
+    def _make_tree(self, workspace: Path) -> None:
+        (workspace / "myproj" / "src").mkdir(parents=True)
+        (workspace / "myproj" / "docs").mkdir()
+        (workspace / "myproj" / "src" / "main.py").write_text("print('hi')", encoding="utf-8")
+        (workspace / "myproj" / "README.md").write_text("# demo", encoding="utf-8")
+        (workspace / "top.txt").write_text("top", encoding="utf-8")
+
+    def test_list_files_non_recursive(self):
+        with tempfile.TemporaryDirectory() as d:
+            workspace = Path(d)
+            self._make_tree(workspace)
+            ctx = {"workspace_root": workspace}
+            result = dispatch("list_files", {}, ctx)
+            self.assertIn("[目录] myproj/", result)
+            self.assertIn("[文件] top.txt", result)
+
+    def test_list_files_recursive_and_pattern(self):
+        with tempfile.TemporaryDirectory() as d:
+            workspace = Path(d)
+            self._make_tree(workspace)
+            ctx = {"workspace_root": workspace}
+            result = dispatch("list_files", {"recursive": True}, ctx)
+            self.assertIn("myproj/src/main.py", result)
+            self.assertIn("myproj/README.md", result)
+            # 通配符只保留匹配的文件，目录项仍在
+            only_py = dispatch("list_files", {"recursive": True, "pattern": "*.py"}, ctx)
+            self.assertIn("myproj/src/main.py", only_py)
+            self.assertNotIn("README.md", only_py)
+
+    def test_list_files_rejects_escape(self):
+        with tempfile.TemporaryDirectory() as d:
+            workspace = Path(d) / "ws"
+            workspace.mkdir()
+            ctx = {"workspace_root": workspace}
+            result = dispatch("list_files", {"path": ".."}, ctx)
+            self.assertIn("不允许访问工作区之外的路径", result)
+
+    def test_workspace_folder_is_discoverable_and_readable(self):
+        """端到端：本地工作空间里的目录（无需上传），Agent 可 list_files 发现并 read_document 读取。"""
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "myproj" / "src"
+            target.mkdir(parents=True)
+            (target / "app.py").write_text("print('v1')", encoding="utf-8")
+
+            ctx = {"workspace_root": Path(d), "max_read_bytes": 100_000, "allow_write": True}
+            listing = dispatch("list_files", {"recursive": True}, ctx)
+            self.assertIn("myproj/src/app.py", listing)
+            self.assertEqual(dispatch("read_document", {"path": "myproj/src/app.py"}, ctx), "print('v1')")
 
 
 class ConfigTests(unittest.TestCase):

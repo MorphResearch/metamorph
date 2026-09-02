@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+
+# Local data & runtime artifacts
+.metamorph/
+logs/
+serve.log
+serve.err
+.metamorph_serve.*
+
+# Downloaded benchmark repositories, datasets, environments, and run outputs
+benchmarks/browsecomp-plus/
+benchmarks/tau2-bench/
+benchmarks/tau3-bench/
+benchmarks/workbench/
+benchmarks/*.tar.gz
+
+# Secrets / local data
+.env
+.env.*
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

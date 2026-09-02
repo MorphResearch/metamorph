@@ -1,7 +1,11 @@
-"""POST /v1/uploads — save user-uploaded images into the task workspace.
+"""Upload endpoints — save user uploads into the task workspace.
 
-图片以 base64 形式从浏览器上传，保存到目标工作空间的 uploads/ 子目录，
-返回服务端路径；前端在消息气泡中展示缩略图，模型可通过文件名感知上传内容。
+``POST /v1/uploads``：图片上传，保存到工作空间 uploads/ 子目录，文件名用
+uuid 重命名，避免互相覆盖；前端在消息气泡中展示缩略图，模型可通过文件名
+感知上传内容。
+
+文件夹内容无需上传：本地部署下用户直接用"选择文件夹"把目录设为工作空间，
+Agent 通过 ``list_files`` / ``read_document`` 原地读写。
 """
 
 from __future__ import annotations
@@ -18,6 +22,44 @@ from api.workers import TaskWorker
 _ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 _MAX_FILE_BYTES = 10 * 1024 * 1024  # 单图上限 10MB
 _MAX_FILES = 6
+
+
+def _resolve_upload_base(handler: object, worker: TaskWorker, payload: dict) -> Path | None:
+    """解析上传目标工作空间：优先绝对路径，其次默认 workspace/<id>。"""
+    workspace_path = str(payload.get("workspace_path", "")).strip()
+    if workspace_path:
+        base = Path(workspace_path).expanduser().resolve()
+        if not base.exists() or not base.is_dir():
+            json_response(handler, 400, {"error": f"workspace_path is not an existing directory: {workspace_path}"})
+            return None
+        return base
+    try:
+        workspace_id = safe_workspace_id(payload.get("workspace_id", "default"))
+    except ValueError as exc:
+        json_response(handler, 400, {"error": str(exc)})
+        return None
+    return worker.settings.workspace_root / workspace_id
+
+
+def _decode_file_payload(handler: object, item: dict, max_bytes: int) -> bytes | None:
+    """校验并解码单个上传文件（base64 / data URL），失败时已写好错误响应。"""
+    name = str(item.get("name", "")).strip() or "file"
+    data_b64 = str(item.get("data_base64", ""))
+    if not data_b64:
+        json_response(handler, 400, {"error": f"data_base64 is required for {name}"})
+        return None
+    # 兼容 data URL 前缀（data:image/png;base64,xxxx）
+    if "," in data_b64 and data_b64.strip().startswith("data:"):
+        data_b64 = data_b64.split(",", 1)[1]
+    try:
+        raw = base64.b64decode(data_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        json_response(handler, 400, {"error": f"invalid base64 in {name}: {exc}"})
+        return None
+    if len(raw) > max_bytes:
+        json_response(handler, 400, {"error": f"{name} exceeds {max_bytes // (1024 * 1024)}MB limit"})
+        return None
+    return raw
 
 
 def save_uploads(handler: object, worker: TaskWorker, body: bytes) -> None:
@@ -39,20 +81,9 @@ def save_uploads(handler: object, worker: TaskWorker, body: bytes) -> None:
         json_response(handler, 400, {"error": f"too many files (max {_MAX_FILES})"})
         return
 
-    # 目标目录：优先绝对路径，其次默认 workspace/<id>
-    workspace_path = str(payload.get("workspace_path", "")).strip()
-    if workspace_path:
-        base = Path(workspace_path).expanduser().resolve()
-        if not base.exists() or not base.is_dir():
-            json_response(handler, 400, {"error": f"workspace_path is not an existing directory: {workspace_path}"})
-            return
-    else:
-        try:
-            workspace_id = safe_workspace_id(payload.get("workspace_id", "default"))
-        except ValueError as exc:
-            json_response(handler, 400, {"error": str(exc)})
-            return
-        base = worker.settings.workspace_root / workspace_id
+    base = _resolve_upload_base(handler, worker, payload)
+    if base is None:
+        return
 
     upload_dir = base / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -67,20 +98,8 @@ def save_uploads(handler: object, worker: TaskWorker, body: bytes) -> None:
         if ext not in _ALLOWED_EXTS:
             json_response(handler, 400, {"error": f"unsupported image type: {ext or '(none)'}"})
             return
-        data_b64 = str(item.get("data_base64", ""))
-        if not data_b64:
-            json_response(handler, 400, {"error": "data_base64 is required"})
-            return
-        # 兼容 data URL 前缀（data:image/png;base64,xxxx）
-        if "," in data_b64 and data_b64.strip().startswith("data:"):
-            data_b64 = data_b64.split(",", 1)[1]
-        try:
-            raw = base64.b64decode(data_b64, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            json_response(handler, 400, {"error": f"invalid base64 in {name}: {exc}"})
-            return
-        if len(raw) > _MAX_FILE_BYTES:
-            json_response(handler, 400, {"error": f"{name} exceeds 10MB limit"})
+        raw = _decode_file_payload(handler, item, _MAX_FILE_BYTES)
+        if raw is None:
             return
         saved_name = f"{uuid.uuid4().hex[:12]}{ext}"
         target = upload_dir / saved_name

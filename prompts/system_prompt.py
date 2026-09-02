@@ -20,7 +20,12 @@ TOOL_GUIDANCE = """\
 
 - `web_search`：检索互联网，适合"最新/具体事实/需要时效"的问题。
 - `web_fetch`：抓取某个 URL 的正文，用于深入阅读某个页面。
-- `read_document`：读取工作区内的文档（txt / md / PDF / Word 等）。
+- `list_files`：列出工作区内目录的结构（可递归、可按通配符过滤）。
+  面对"检查工作区/上传的文件夹"类任务，先列结构再决定读哪些文件。
+- `read_document`：读取工作区内的文件（txt / md / 代码与配置文件 / PDF / Word 等）。
+- `write_file`：在工作区内创建或覆盖一个 UTF-8 文本文件（自动创建父目录）。
+  仅当执行策略允许写入时使用；如果工具返回写入被拒绝，不要重试或声称已保存，
+  改为把内容直接输出给用户。
 - `update_task_list`：多步任务的可见任务清单。处理有 3 个步骤以上的任务时，
   开始前创建清单（每项 content + status: pending/in_progress/completed），
   每完成一步就更新一次（每次传完整清单）。简单问答不要使用。

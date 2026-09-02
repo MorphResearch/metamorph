@@ -43,6 +43,21 @@ const state = {
   busy: false,
 };
 
+// ---------- 本地持久化：工作空间 / Agent 模式在同会话内保持，除非手动更换 ----------
+const LS_WS_PATH = "metamorph.ws_path";
+const LS_WS_ID = "metamorph.ws_id";
+const LS_AGENT_MODE = "metamorph.agent_mode";
+
+function lsGet(key, fallback = "") {
+  try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; }
+}
+function lsSet(key, val) {
+  try { localStorage.setItem(key, val); } catch (e) { /* 隐私模式等忽略 */ }
+}
+function lsRemove(key) {
+  try { localStorage.removeItem(key); } catch (e) {}
+}
+
 const messagesEl = document.getElementById("messages");
 const promptInput = document.getElementById("prompt-input");
 const sendBtn = document.getElementById("send-btn");
@@ -85,6 +100,7 @@ function resetChat() {
   setChatHeader("新建任务", "输入任务开始一次新的 Agent 运行");
   setComposerDisabled(false);
   setSendMode("send");
+  clearPendingImages();
   bindChips();
 }
 
@@ -102,7 +118,11 @@ async function loadInfo() {
     prov.className = "pill pill-info";
     prov.title = `工作区根目录: ${data.workspace_root} · 允许写入: ${data.allow_write ? "是" : "否"}`;
     const modeSelect = document.getElementById("agent-mode");
-    if (modeSelect && ["single", "multiagent"].includes(data.mode)) modeSelect.value = data.mode;
+    if (modeSelect) {
+      // 优先恢复用户上次选择，其次用后端默认
+      const saved = lsGet(LS_AGENT_MODE);
+      modeSelect.value = (saved && ["single", "multiagent"].includes(saved)) ? saved : data.mode;
+    }
   } catch (e) {
     conn.textContent = "连接失败";
     conn.className = "pill pill-err";
@@ -288,8 +308,10 @@ function buildChainItem(ev, msgEl) {
     const agent = ev.agent || {};
     const wrap = document.createElement("div");
     wrap.className = "chain-item think";
+    const cancelled = agent.metrics && agent.metrics.cancelled;
+    const label = cancelled ? "已取消" : (agent.success ? "已完成角色任务" : "角色执行失败");
     wrap.innerHTML = `<div class="ci-head"><span class="ci-icon">👤</span><span class="ci-title">${escapeHtml(agent.role || agent.agent_id || "Agent")}</span></div>` +
-      `<div class="ci-body">${agent.success ? "已完成角色任务" : "角色执行失败"}</div>`;
+      `<div class="ci-body">${label}</div>`;
     return wrap;
   }
 
@@ -470,15 +492,34 @@ async function fetchEvents(runId) {
 async function refreshRun(msgEl, runId = state.currentRunId) {
   if (!runId || !msgEl) return;
   const { ok, data } = await api(`/v1/runs/${runId}`);
-  if (!ok || !data) return;
-  renderEventsInto(msgEl, await fetchEvents(runId));
+  if (!ok || !data) {
+    // run 丢失（如服务重启导致内存态清空且磁盘无记录）：停止轮询并收尾，避免无限轮询
+    if (runId === state.currentRunId) {
+      stopPolling();
+      setStatusText(msgEl, "已中断");
+      finishMessage(msgEl, {
+        run_id: runId,
+        status: "failed",
+        result: { error: "运行记录丢失（服务可能已重启），请重新提交任务" },
+      });
+    }
+    return;
+  }
+  // 先判断终态，再渲染事件：即使渲染抛异常，轮询也能正常停止
   const status = data.status;
+  const TERMINAL = ["completed", "passed", "failed", "cancelled"];
+  if (TERMINAL.includes(status)) {
+    if (runId === state.currentRunId) stopPolling();
+  }
+  try {
+    renderEventsInto(msgEl, await fetchEvents(runId));
+  } catch (e) { /* 渲染失败不影响轮询收敛 */ }
   if (status === "queued") setStatusText(msgEl, "排队中…");
   else if (status === "running") setStatusText(msgEl, "调用 LLM 中…");
+  else if (status === "cancelling") setStatusText(msgEl, "正在停止…");
   else setStatusText(msgEl, statusMeta(status).label);
 
-  if (["completed", "passed", "failed", "cancelled"].includes(status)) {
-    if (runId === state.currentRunId) stopPolling();
+  if (TERMINAL.includes(status)) {
     finishMessage(msgEl, data);
     await loadHistory();
   }
@@ -526,7 +567,7 @@ function handleImageFiles(fileList) {
 // ---------- 本地文件夹选择（工作空间） ----------
 const fsModal = document.getElementById("fs-modal");
 let fsCurrentPath = "";      // 弹层中当前浏览的目录
-let selectedWsPath = "";     // 已确认的工作空间路径
+let selectedWsPath = lsGet(LS_WS_PATH, "");  // 已确认的工作空间路径（刷新后恢复）
 
 function updateWsUi() {
   const label = document.getElementById("ws-path-label");
@@ -697,7 +738,7 @@ async function loadConversationIntoChat(conversationId) {
     addUserMessage(run.task || "(无描述)");
     const message = addAssistantMessage(run.run_id);
     renderEventsInto(message, await fetchEvents(run.run_id));
-    if (["completed", "passed", "failed"].includes(run.status)) {
+    if (["completed", "passed", "failed", "cancelled"].includes(run.status)) {
       finishMessage(message, run);
     } else {
       activeRun = run;
@@ -782,6 +823,16 @@ sendBtn.addEventListener("click", () => {
 });
 promptInput.addEventListener("input", autoGrow);
 
+// Agent 模式切换：持久化用户选择
+document.getElementById("agent-mode").addEventListener("change", (event) => {
+  lsSet(LS_AGENT_MODE, event.target.value);
+});
+
+// 工作空间 ID 输入：持久化用户输入（未选择文件夹时用）
+document.getElementById("workspace-input").addEventListener("change", (event) => {
+  lsSet(LS_WS_ID, event.target.value.trim() || "default");
+});
+
 // ---------- 图片上传事件绑定 ----------
 document.getElementById("upload-img-btn").addEventListener("click", () => {
   document.getElementById("img-file-input").click();
@@ -805,11 +856,13 @@ document.getElementById("fs-close-btn").addEventListener("click", closeFsModal);
 document.getElementById("fs-select-btn").addEventListener("click", () => {
   if (!fsCurrentPath) return;
   selectedWsPath = fsCurrentPath;
+  lsSet(LS_WS_PATH, selectedWsPath);
   updateWsUi();
   closeFsModal();
 });
 document.getElementById("ws-clear-btn").addEventListener("click", () => {
   selectedWsPath = "";
+  lsRemove(LS_WS_PATH);
   updateWsUi();
 });
 // 点击遮罩关闭
@@ -832,6 +885,11 @@ function bindChips() {
 // ---------- 启动 ----------
 (async function init() {
   bindChips();
+  // 恢复工作空间（路径或默认 ID）的 UI 显示
+  const wsInput = document.getElementById("workspace-input");
+  const savedWsId = lsGet(LS_WS_ID);
+  if (wsInput && savedWsId) wsInput.value = savedWsId;
+  updateWsUi();
   await loadInfo();
   await loadHistory();
 })();

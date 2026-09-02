@@ -9,6 +9,16 @@ from pydantic import BaseModel, Field
 
 from .base import register
 
+# 纯文本类扩展名：直接按 UTF-8 读取（含常见代码/配置文件，覆盖上传文件夹场景）
+_TEXT_SUFFIXES = {
+    ".txt", ".md", ".text", ".json", ".csv", ".log",
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".cpp", ".h", ".hpp",
+    ".cs", ".go", ".rs", ".rb", ".php", ".swift", ".kt",
+    ".html", ".htm", ".css", ".scss", ".less",
+    ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
+    ".sh", ".bat", ".ps1", ".sql", ".r",
+}
+
 
 class ReadDocumentInput(BaseModel):
     path: str = Field(..., description="工作区内的文档相对路径")
@@ -36,7 +46,7 @@ def read_document(path: str, workspace_root: Path, max_read_bytes: int = 100_000
 
     suffix = full.suffix.lower()
     try:
-        if suffix in {".txt", ".md", ".text", ".json", ".csv", ".log"}:
+        if suffix in _TEXT_SUFFIXES:
             data = full.read_text(encoding="utf-8", errors="ignore")
             return data[:max_read_bytes]
         if suffix == ".pdf":

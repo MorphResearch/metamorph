@@ -26,6 +26,7 @@ class TaskWorker:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.store = RunStore(settings.data_dir)
+        self._reap_orphan_runs()
         self._client = build_client(
             settings.provider,
             model_name=settings.model_name,
@@ -39,6 +40,16 @@ class TaskWorker:
     @property
     def client(self) -> Any:
         return self._client
+
+    def _reap_orphan_runs(self) -> None:
+        """进程启动时收尾：上一个进程遗留的未终态 run（线程已随进程消失）标记为 cancelled，
+        避免前端对孤儿 run 无限轮询、取消接口 404。"""
+        try:
+            for run in self.store.list_recent(200):
+                if run.get("status") in {"queued", "running", "cancelling"}:
+                    self.store.update(run["run_id"], "cancelled")
+        except Exception:
+            pass  # 收尾失败不阻塞服务启动
 
     def submit(
         self,
@@ -73,15 +84,24 @@ class TaskWorker:
         return run_id, conv_id
 
     def cancel(self, run_id: str) -> bool:
-        """请求停止一个运行中的任务（协作式取消）。返回是否已受理。"""
+        """请求停止一个运行中的任务（立即生效，幂等）。返回是否受理。"""
         with self._lock:
             event = self._cancel_flags.get(run_id)
-        if event is None:
-            return False
-        event.set()
+        if event is not None:
+            event.set()
+            # 立即落盘 cancelled，前端无需等待 cancelling→cancelled 转换
+            run = self.store.get(run_id)
+            if run and run.get("status") in {"queued", "running", "cancelling"}:
+                self.store.update(run_id, "cancelled")
+            return True
+        # 内存无取消标记的两种情况，只要 run 存在都幂等受理（不 404）：
+        # 1) 孤儿 run：线程已随上个进程消失，磁盘状态卡在非终态 → 落盘 cancelled 收敛
+        # 2) 已结束的 run：标记被 finally 清理，点停止晚于任务完成 → 本来就已停止
         run = self.store.get(run_id)
-        if run and run.get("status") in {"queued", "running"}:
-            self.store.update(run_id, "cancelling")
+        if run is None:
+            return False  # 只有真正不存在的 run 才 404
+        if run.get("status") in {"queued", "running", "cancelling"}:
+            self.store.update(run_id, "cancelled")
         return True
 
     def _run(
@@ -119,6 +139,7 @@ class TaskWorker:
                         max_total_tokens=self.settings.max_total_tokens,
                         max_latency_seconds=self.settings.max_latency_seconds,
                         allow_write=self.settings.allow_write,
+                        should_stop=should_stop,
                     )
                     return {"answer": answer, "metrics": role_metrics}
 
@@ -127,6 +148,7 @@ class TaskWorker:
                     data_dir=self.settings.data_dir,
                     logger=logger,
                     max_parallelism=self.settings.max_parallel_agents,
+                    should_stop=should_stop,
                     budget_policy=BudgetPolicy(
                         max_total_tokens=self.settings.max_total_tokens,
                         max_latency_seconds=self.settings.max_latency_seconds,
@@ -177,11 +199,19 @@ class TaskWorker:
                 result.update({k: v for k, v in multi_result.items() if k != "answer"})
             logger.emit("run.evaluated", result=result)
             logger.write_json("result.json", result)
+            # 若用户已取消（cancel() 已落盘 cancelled），不允许 completed 覆盖
+            current = self.store.get(run_id)
+            if current and current.get("status") == "cancelled":
+                result["status"] = "cancelled"
             self.store.update(run_id, result["status"], result)
         except Exception as exc:
             logger.emit("run.error", error=str(exc))
-            result = {"run_id": run_id, "conversation_id": conversation_id, "status": "failed", "error": str(exc)}
-            self.store.update(run_id, "failed", result)
+            current = self.store.get(run_id)
+            if current and current.get("status") == "cancelled":
+                result = {"run_id": run_id, "conversation_id": conversation_id, "status": "cancelled"}
+            else:
+                result = {"run_id": run_id, "conversation_id": conversation_id, "status": "failed", "error": str(exc)}
+            self.store.update(run_id, result["status"], result)
         finally:
             with self._lock:
                 self._cancel_flags.pop(run_id, None)
