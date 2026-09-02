@@ -32,13 +32,15 @@ def run_agent(
     max_total_tokens: int | None = None,
     max_latency_seconds: float | None = None,
     allow_write: bool = False,
+    should_stop: Callable[[], bool] | None = None,
 ) -> str:
     """Run the agent loop. Returns the final assistant answer text.
 
     ``history`` is the conversation message history (role/content pairs) to
     splice in before the newest user turn.  ``emit`` (optional) is called
     with ``(event_name, payload)`` for live streaming to the UI; otherwise
-    events go through ``logger``.
+    events go through ``logger``.  ``should_stop`` enables collaborative
+    cancellation (UI stop button).
     """
     ctx = {
         "data_dir": Path(data_dir),
@@ -61,4 +63,5 @@ def run_agent(
         max_tool_calls=max_tool_calls,
         max_total_tokens=max_total_tokens,
         max_latency_seconds=max_latency_seconds,
+        should_stop=should_stop,
     )

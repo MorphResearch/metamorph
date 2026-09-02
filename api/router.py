@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from . import __version__
 from .middleware import is_authorized, json_response, static_file
 from .workers import TaskWorker
-from .v1 import conversations, info, runs, tasks
+from .v1 import conversations, fs, info, runs, tasks, uploads
 from config import Settings
 
 
@@ -45,6 +45,11 @@ class _RouteHandler(BaseHTTPRequestHandler):
         # /v1/info
         if path == "/v1/info":
             info.handle_get(self, self.worker.settings)
+            return
+
+        # /v1/fs/list — workspace 目录浏览
+        if path == "/v1/fs/list":
+            fs.list_directories(self, self.worker, urlparse(self.path).query)
             return
 
         # /v1/runs
@@ -79,17 +84,32 @@ class _RouteHandler(BaseHTTPRequestHandler):
         if path.startswith("/v1/") and not is_authorized(self, self.worker.settings.api_token_env):
             json_response(self, 401, {"error": "unauthorized"})
             return
-        if path != "/v1/tasks":
+
+        # /v1/tasks/{id}/cancel — 停止运行中的任务
+        parts = path.split("/")
+        if len(parts) == 5 and parts[1:4] == ["v1", "tasks"] and parts[4] == "cancel":
+            accepted = self.worker.cancel(parts[3])
+            if accepted:
+                json_response(self, 202, {"run_id": parts[3], "status": "cancelling"})
+            else:
+                json_response(self, 404, {"error": "run not found or already finished"})
+            return
+
+        if path != "/v1/tasks" and path != "/v1/uploads":
             json_response(self, 404, {"error": "not found"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length < 0 or length > 1_000_000:
+            # 图片上传上限：6 张 × 10MB × base64 膨胀系数(约1.37) 取 90MB
+            if length < 0 or length > 90_000_000:
                 json_response(self, 413, {"error": "request body is too large"})
                 return
             body = self.rfile.read(length) if length > 0 else b"{}"
         except ValueError:
             json_response(self, 400, {"error": "invalid Content-Length"})
+            return
+        if path == "/v1/uploads":
+            uploads.save_uploads(self, self.worker, body)
             return
         tasks.submit_task(self, self.worker, body)
 

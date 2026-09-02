@@ -34,6 +34,7 @@ class TaskWorker:
         )
         self._workers: list[threading.Thread] = []
         self._lock = threading.Lock()
+        self._cancel_flags: dict[str, threading.Event] = {}
 
     @property
     def client(self) -> Any:
@@ -58,6 +59,8 @@ class TaskWorker:
             raise ValueError("mode must be single or multiagent")
         run_id, conv_id = self.store.create(task, resolved, conversation_id=conversation_id)
         history = self.store.get_conversation(conv_id) if conv_id else []
+        with self._lock:
+            self._cancel_flags[run_id] = threading.Event()
         thread = threading.Thread(
             target=self._run,
             args=(run_id, conv_id, task, resolved, history, selected_mode),
@@ -68,6 +71,18 @@ class TaskWorker:
             self._workers.append(thread)
         thread.start()
         return run_id, conv_id
+
+    def cancel(self, run_id: str) -> bool:
+        """请求停止一个运行中的任务（协作式取消）。返回是否已受理。"""
+        with self._lock:
+            event = self._cancel_flags.get(run_id)
+        if event is None:
+            return False
+        event.set()
+        run = self.store.get(run_id)
+        if run and run.get("status") in {"queued", "running"}:
+            self.store.update(run_id, "cancelling")
+        return True
 
     def _run(
         self,
@@ -81,6 +96,9 @@ class TaskWorker:
         run_dir = self.store.runs_dir / run_id
         logger = EventLogger(run_dir)
         self.store.update(run_id, "running")
+        with self._lock:
+            cancel_event = self._cancel_flags.get(run_id)
+        should_stop = (lambda: cancel_event.is_set()) if cancel_event is not None else None
         try:
             if mode == "multiagent":
                 def run_role(prompt: str, agent_id: str) -> dict[str, Any]:
@@ -137,14 +155,17 @@ class TaskWorker:
                     max_latency_seconds=self.settings.max_latency_seconds,
                     max_tool_calls=self.settings.max_tool_calls,
                     allow_write=self.settings.allow_write,
+                    should_stop=should_stop,
                 )
             # Persist both sides of the exchange to conversation history.
+            was_cancelled = should_stop is not None and should_stop()
             self.store.append_message(conversation_id, "user", task)
-            self.store.append_message(conversation_id, "assistant", answer)
+            if answer or not was_cancelled:
+                self.store.append_message(conversation_id, "assistant", answer)
             result: dict[str, Any] = {
                 "run_id": run_id,
                 "conversation_id": conversation_id,
-                "status": "completed",
+                "status": "cancelled" if was_cancelled else "completed",
                 "answer": answer,
                 "provider": self.client.provider,
                 "model": self.client.model_name,
@@ -161,6 +182,9 @@ class TaskWorker:
             logger.emit("run.error", error=str(exc))
             result = {"run_id": run_id, "conversation_id": conversation_id, "status": "failed", "error": str(exc)}
             self.store.update(run_id, "failed", result)
+        finally:
+            with self._lock:
+                self._cancel_flags.pop(run_id, None)
 
     def get(self, run_id: str) -> dict[str, Any] | None:
         return self.store.get(run_id)

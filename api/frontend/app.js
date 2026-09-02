@@ -25,6 +25,8 @@ function statusMeta(status) {
   switch (status) {
     case "queued": return { cls: "pill-off", label: "排队中" };
     case "running": return { cls: "pill-run", label: "运行中" };
+    case "cancelling": return { cls: "pill-run", label: "停止中" };
+    case "cancelled": return { cls: "pill-off", label: "已停止" };
     case "passed":
     case "completed": return { cls: "pill-ok", label: "已完成" };
     case "failed": return { cls: "pill-err", label: "失败" };
@@ -82,6 +84,7 @@ function resetChat() {
   messagesEl.innerHTML = welcomeHtml();
   setChatHeader("新建任务", "输入任务开始一次新的 Agent 运行");
   setComposerDisabled(false);
+  setSendMode("send");
   bindChips();
 }
 
@@ -135,14 +138,20 @@ async function loadHistory() {
 }
 
 // ---------- 消息渲染 ----------
-function addUserMessage(text) {
+function addUserMessage(text, images = []) {
   removeWelcome();
   const div = document.createElement("div");
   div.className = "msg user";
   const time = new Date().toTimeString().slice(0, 5);
+  const imgsHtml = images.length
+    ? `<div class="msg-imgs">` + images.map((img) =>
+        `<img src="${img.dataUrl}" class="msg-img" alt="${escapeHtml(img.name)}" title="${escapeHtml(img.name)}" />`
+      ).join("") + `</div>`
+    : "";
   div.innerHTML =
     `<div class="msg-col">` +
-      `<div class="bubble">${textToHtml(text)}</div>` +
+      imgsHtml +
+      (text ? `<div class="bubble">${textToHtml(text)}</div>` : `<div class="bubble">[图片]</div>`) +
       `<div class="msg-time">${time}</div>` +
     `</div>`;
   messagesEl.appendChild(div);
@@ -183,6 +192,65 @@ function ensureThinkingPanel(msgEl) {
   return panel;
 }
 
+// ---------- 执行过程卡片 ----------
+// 工具元数据：图标 + 动作词 + 目标摘要提取
+const TOOL_META = {
+  read_document: { icon: "📖", action: "读取", pick: (a) => a.path },
+  web_search: { icon: "🔍", action: "检索", pick: (a) => a.query },
+  web_fetch: { icon: "🌐", action: "抓取", pick: (a) => a.url },
+  update_user_memory: { icon: "🧠", action: "更新记忆", pick: () => "" },
+  update_task_list: { icon: "📋", action: "任务清单", pick: () => "" },
+};
+
+function buildToolRow(tool, args, ok, output) {
+  const meta = TOOL_META[tool] || { icon: "🔧", action: tool, pick: () => "" };
+  let target = "";
+  try { target = String(meta.pick(args) || ""); } catch (e) { target = ""; }
+  const wrap = document.createElement("div");
+  wrap.className = "tool-row";
+  const line = document.createElement("div");
+  line.className = "tr-line" + (ok ? "" : " err");
+  line.innerHTML =
+    `<span class="tr-icon">${meta.icon}</span>` +
+    `<span class="tr-action">${escapeHtml(meta.action)}</span>` +
+    (target ? `<span class="tr-target">${escapeHtml(target)}</span>` : "") +
+    `<span class="tr-status">${ok ? "✓" : "✕"}</span>`;
+  const detail = document.createElement("div");
+  detail.className = "tr-detail";
+  detail.hidden = true;
+  let argStr = "";
+  try { argStr = JSON.stringify(args); } catch (e) { argStr = String(args); }
+  const shown = output.slice(0, 800) + (output.length > 800 ? "…" : "");
+  detail.innerHTML =
+    `<div class="ci-args">参数: ${escapeHtml(argStr)}</div>` +
+    (shown ? `<div class="ci-out">${escapeHtml(shown)}</div>` : "");
+  line.addEventListener("click", () => { detail.hidden = !detail.hidden; });
+  wrap.appendChild(line);
+  wrap.appendChild(detail);
+  return wrap;
+}
+
+function buildTaskListCard(tasksJson) {
+  let tasks = [];
+  try { tasks = JSON.parse(tasksJson) || []; } catch (e) { tasks = []; }
+  if (!Array.isArray(tasks) || tasks.length === 0) return null;
+  const done = tasks.filter((t) => t.status === "completed").length;
+  const wrap = document.createElement("div");
+  wrap.className = "tasklist";
+  const statusIcon = { completed: "✓", in_progress: "▶", pending: "○" };
+  wrap.innerHTML =
+    `<div class="tl-head"><span class="tl-icon">☰</span>任务清单 ` +
+    `<span class="tl-count">${done}/${tasks.length} 完成</span></div>` +
+    `<div class="tl-items">` +
+    tasks.map((t) => {
+      const cls = t.status === "completed" ? " done" : (t.status === "in_progress" ? " doing" : "");
+      return `<div class="tl-item${cls}"><span class="tl-status">${statusIcon[t.status] || "○"}</span>` +
+        `<span class="tl-text">${escapeHtml(String(t.content || ""))}</span></div>`;
+    }).join("") +
+    `</div>`;
+  return wrap;
+}
+
 function buildChainItem(ev, msgEl) {
   const type = ev.type || "event";
 
@@ -192,21 +260,18 @@ function buildChainItem(ev, msgEl) {
   }
 
   if (type === "tool.completed") {
-    const wrap = document.createElement("div");
-    wrap.className = "chain-item tool";
-    const ok = ev.result && ev.result.ok;
+    const ok = !!(ev.result && ev.result.ok);
     const out = ev.result && ev.result.output ? String(ev.result.output) : "";
     const err = ev.result && ev.result.error ? String(ev.result.error) : "";
-    let argStr = "";
-    try { argStr = JSON.stringify(ev.arguments || {}); } catch (e) { argStr = String(ev.arguments || ""); }
-    const shown = (err || out).slice(0, 600) + ((err || out).length > 600 ? "…" : "");
-    wrap.innerHTML =
-      `<div class="ci-head ${ok ? "" : "err"}"><span class="ci-icon">🔧</span>` +
-      `<span class="ci-title">调用工具: ${escapeHtml(ev.tool || "")}</span>` +
-      `<span class="ci-status">${ok ? "成功" : "失败"}</span></div>` +
-      `<div class="ci-body"><div class="ci-args">参数: ${escapeHtml(argStr)}</div>` +
-      (shown ? `<div class="ci-out">${escapeHtml(shown)}</div>` : "") + `</div>`;
-    return wrap;
+    const args = ev.arguments || {};
+
+    // 任务清单工具 → Task List 卡片
+    if (ev.tool === "update_task_list") {
+      return buildTaskListCard(args.tasks_json || "");
+    }
+
+    // 其他工具 → 单行条目，点击展开参数与输出
+    return buildToolRow(ev.tool || "", args, ok, err || out);
   }
 
   if (type === "architecture.designed") {
@@ -291,17 +356,13 @@ function renderEventsInto(msgEl, events) {
 
     if (type === "model.decision") {
       if (ev.action === "tool_call") {
-        // 工具轮：把该轮流出的有效文本归档为步骤叙述，回答区清空等待最终答案
-        // 注意 trim 判断：模型常在工具调用前只输出换行/空格，纯空白不渲染卡片
+        // 工具轮：模型叙述渲染为思考段落（无边框浅色文本，像思考流）
         const narrative = answerBuf.trim();
         if (narrative) {
-          const wrap = document.createElement("div");
-          wrap.className = "chain-item step";
-          wrap.innerHTML =
-            `<div class="ci-head"><span class="ci-dot"></span><span class="ci-title">第 ${escapeHtml(ev.step ?? "?")} 步</span>` +
-            `<span class="ci-status">工具调用</span></div>` +
-            `<div class="ci-body">${textToHtml(narrative)}</div>`;
-          chainEl.appendChild(wrap);
+          const para = document.createElement("div");
+          para.className = "chain-thought";
+          para.textContent = narrative;
+          chainEl.appendChild(para);
           hasProcess = true;
         }
         answerBuf = "";
@@ -396,6 +457,7 @@ function finishMessage(msgEl, run) {
   if (run.run_id === state.currentRunId) {
     state.busy = false;
     setComposerDisabled(false);
+    setSendMode("send");
     setChatHeader(document.getElementById("chat-title")?.textContent || "当前对话", "任务已完成，可以继续追问");
   }
 }
@@ -415,7 +477,7 @@ async function refreshRun(msgEl, runId = state.currentRunId) {
   else if (status === "running") setStatusText(msgEl, "调用 LLM 中…");
   else setStatusText(msgEl, statusMeta(status).label);
 
-  if (["completed", "passed", "failed"].includes(status)) {
+  if (["completed", "passed", "failed", "cancelled"].includes(status)) {
     if (runId === state.currentRunId) stopPolling();
     finishMessage(msgEl, data);
     await loadHistory();
@@ -423,32 +485,184 @@ async function refreshRun(msgEl, runId = state.currentRunId) {
   scrollBottom();
 }
 
+// ---------- 图片上传 ----------
+const pendingImages = [];  // [{name, dataUrl}]
+
+function renderImgPreviews() {
+  const box = document.getElementById("img-previews");
+  if (!pendingImages.length) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  box.innerHTML = pendingImages.map((img, idx) =>
+    `<div class="img-chip"><img src="${img.dataUrl}" alt="${escapeHtml(img.name)}" title="${escapeHtml(img.name)}" />` +
+    `<button class="img-chip-del" data-idx="${idx}" title="移除">✕</button></div>`
+  ).join("");
+  box.querySelectorAll(".img-chip-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      pendingImages.splice(Number(btn.dataset.idx), 1);
+      renderImgPreviews();
+    });
+  });
+}
+
+function clearPendingImages() {
+  pendingImages.length = 0;
+  renderImgPreviews();
+}
+
+function handleImageFiles(fileList) {
+  const files = Array.from(fileList || []).slice(0, 6 - pendingImages.length);
+  files.forEach((file) => {
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > 10 * 1024 * 1024) return;  // 与后端 10MB 上限一致
+    const reader = new FileReader();
+    reader.onload = () => {
+      pendingImages.push({ name: file.name, dataUrl: reader.result });
+      renderImgPreviews();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ---------- 本地文件夹选择（工作空间） ----------
+const fsModal = document.getElementById("fs-modal");
+let fsCurrentPath = "";      // 弹层中当前浏览的目录
+let selectedWsPath = "";     // 已确认的工作空间路径
+
+function updateWsUi() {
+  const label = document.getElementById("ws-path-label");
+  const clearBtn = document.getElementById("ws-clear-btn");
+  const defaultLabel = document.getElementById("ws-default-label");
+  const wsInput = document.getElementById("workspace-input");
+  if (selectedWsPath) {
+    label.textContent = selectedWsPath;
+    label.title = selectedWsPath;
+    label.hidden = false;
+    clearBtn.hidden = false;
+    defaultLabel.hidden = true;
+    wsInput.hidden = true;
+  } else {
+    label.hidden = true;
+    clearBtn.hidden = true;
+    defaultLabel.hidden = false;
+    wsInput.hidden = false;
+  }
+}
+
+function fsBreadcrumb(path) {
+  const el = document.getElementById("fs-breadcrumb");
+  el.innerHTML = "";
+  const rootBtn = document.createElement("button");
+  rootBtn.className = "fs-crumb";
+  rootBtn.textContent = "此电脑";
+  rootBtn.addEventListener("click", () => fsNavigate(""));
+  el.appendChild(rootBtn);
+  if (!path) return;
+  // 按 \ 分段生成可点击层级（保留盘符冒号）
+  const parts = path.split("\\").filter(Boolean);
+  let acc = "";
+  parts.forEach((part, idx) => {
+    acc = idx === 0 ? `${part}\\` : `${acc}\\${part}`;
+    const sep = document.createElement("span");
+    sep.className = "fs-crumb-sep";
+    sep.textContent = "›";
+    el.appendChild(sep);
+    const btn = document.createElement("button");
+    btn.className = "fs-crumb" + (idx === parts.length - 1 ? " current" : "");
+    btn.textContent = part;
+    btn.addEventListener("click", () => fsNavigate(acc));
+    el.appendChild(btn);
+  });
+}
+
+async function fsNavigate(path) {
+  const listEl = document.getElementById("fs-list");
+  listEl.innerHTML = `<div class="fs-empty">加载中…</div>`;
+  const { ok, data } = await api(`/v1/fs/list?path=${encodeURIComponent(path)}`);
+  if (!ok || !data) { listEl.innerHTML = `<div class="fs-empty">目录不可访问</div>`; return; }
+  fsCurrentPath = data.path || "";
+  fsBreadcrumb(fsCurrentPath);
+  document.getElementById("fs-current").textContent = fsCurrentPath || "此电脑（选择盘符）";
+  listEl.innerHTML = "";
+  if (!fsCurrentPath) document.getElementById("fs-current").textContent = "";
+  const entries = data.entries || [];
+  if (entries.length === 0) {
+    listEl.innerHTML = `<div class="fs-empty">此目录下没有子文件夹</div>`;
+    return;
+  }
+  entries.forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "fs-item";
+    item.innerHTML = `<span class="fs-item-icon">📁</span><span class="fs-item-name">${escapeHtml(entry.name)}</span>`;
+    item.addEventListener("click", () => fsNavigate(entry.path));
+    listEl.appendChild(item);
+  });
+}
+
+function openFsModal() {
+  fsModal.hidden = false;
+  fsNavigate("");
+}
+
+function closeFsModal() {
+  fsModal.hidden = true;
+}
+
 // ---------- 提交任务 ----------
 async function submitTask(taskText) {
-  if (state.busy || !taskText) return;
+  if (state.busy || (!taskText && !pendingImages.length)) return;
   const workspaceId = document.getElementById("workspace-input").value.trim() || "default";
   const mode = document.getElementById("agent-mode").value;
   state.busy = true;
   setComposerDisabled(true);
-  addUserMessage(taskText);
-  setChatHeader(taskText, `${mode === "multiagent" ? "自适应多 Agent" : "单 Agent"} · 正在执行`);
+  setChatHeader(taskText || "[图片]", `${mode === "multiagent" ? "自适应多 Agent" : "单 Agent"} · 正在执行`);
+
+  const attached = pendingImages.map((p) => ({ name: p.name, dataUrl: p.dataUrl }));
 
   try {
+    // 先上传图片（若有）：保存到工作空间 uploads/ 目录
+    let savedImages = [];
+    if (attached.length) {
+      const upBody = { files: attached.map((p) => ({ name: p.name, data_base64: p.dataUrl })) };
+      if (selectedWsPath) upBody.workspace_path = selectedWsPath;
+      else upBody.workspace_id = workspaceId;
+      const up = await api("/v1/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(upBody),
+      });
+      if (!up.ok) throw new Error(up.data && up.data.error ? up.data.error : "图片上传失败");
+      savedImages = up.data.saved || [];
+    }
+
+    // 任务文本附加图片保存位置，模型可通过文件名感知上传内容
+    let fullTask = taskText;
+    if (savedImages.length) {
+      fullTask = (fullTask ? fullTask + "\n" : "") +
+        `（用户随任务上传了 ${savedImages.length} 张图片，已保存到工作空间：` +
+        savedImages.map((s) => s.saved_path).join("、") + "）";
+    }
+    addUserMessage(taskText, attached);
+    clearPendingImages();
+
+    const bodyPayload = {
+      task: fullTask,
+      mode,
+      conversation_id: state.currentConversationId,
+    };
+    if (selectedWsPath) bodyPayload.workspace_path = selectedWsPath;
+    else bodyPayload.workspace_id = workspaceId;
+
     const { ok, data } = await api("/v1/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task: taskText,
-        workspace_id: workspaceId,
-        mode,
-        conversation_id: state.currentConversationId,
-      }),
+      body: JSON.stringify(bodyPayload),
     });
     if (!ok) throw new Error(data && data.error ? data.error : "提交失败");
     state.currentConversationId = data.conversation_id;
     state.currentRunId = data.run_id;
     const msgEl = addAssistantMessage(data.run_id);
     state.currentMessageEl = msgEl;
+    setSendMode("stop");
     await loadHistory();
     await refreshRun(msgEl, data.run_id);
     startPolling(msgEl, data.run_id);
@@ -496,6 +710,7 @@ async function loadConversationIntoChat(conversationId) {
     state.currentMessageEl = activeMessage;
     state.busy = true;
     setComposerDisabled(true);
+    setSendMode("stop");
     startPolling(activeMessage, activeRun.run_id);
   }
   scrollBottom();
@@ -521,10 +736,31 @@ function stopPolling() {
 
 // ---------- 输入框交互 ----------
 function setComposerDisabled(disabled) {
-  sendBtn.disabled = disabled;
   promptInput.disabled = disabled;
   document.getElementById("agent-mode").disabled = disabled;
   document.getElementById("workspace-input").disabled = disabled;
+  document.getElementById("upload-img-btn").disabled = disabled;
+}
+
+// 发送按钮双态：空闲=发送 ↑，运行中=停止 ⏹
+function setSendMode(mode) {
+  if (mode === "stop") {
+    sendBtn.textContent = "⏹";
+    sendBtn.title = "停止当前任务";
+    sendBtn.classList.add("stopping");
+    sendBtn.disabled = false;
+  } else {
+    sendBtn.textContent = "↑";
+    sendBtn.title = "发送";
+    sendBtn.classList.remove("stopping");
+    sendBtn.disabled = false;
+  }
+}
+
+async function stopCurrentRun() {
+  if (!state.currentRunId) return;
+  try { await api(`/v1/tasks/${state.currentRunId}/cancel`, { method: "POST" }); } catch (e) { /* 轮询会反映最终状态 */ }
+  setStatusText(state.currentMessageEl, "正在停止…");
 }
 
 function autoGrow() {
@@ -534,14 +770,26 @@ function autoGrow() {
 
 function send() {
   const text = promptInput.value.trim();
-  if (!text || state.busy) return;
+  if ((!text && !pendingImages.length) || state.busy) return;
   promptInput.value = "";
   autoGrow();
   submitTask(text);
 }
 
-sendBtn.addEventListener("click", send);
+sendBtn.addEventListener("click", () => {
+  if (state.busy && state.currentRunId) { stopCurrentRun(); return; }
+  send();
+});
 promptInput.addEventListener("input", autoGrow);
+
+// ---------- 图片上传事件绑定 ----------
+document.getElementById("upload-img-btn").addEventListener("click", () => {
+  document.getElementById("img-file-input").click();
+});
+document.getElementById("img-file-input").addEventListener("change", (event) => {
+  handleImageFiles(event.target.files);
+  event.target.value = "";  // 允许重复选择同一文件
+});
 promptInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -550,6 +798,24 @@ promptInput.addEventListener("keydown", (event) => {
 });
 
 document.getElementById("new-chat").addEventListener("click", resetChat);
+
+// ---------- 文件夹选择事件绑定 ----------
+document.getElementById("pick-folder-btn").addEventListener("click", openFsModal);
+document.getElementById("fs-close-btn").addEventListener("click", closeFsModal);
+document.getElementById("fs-select-btn").addEventListener("click", () => {
+  if (!fsCurrentPath) return;
+  selectedWsPath = fsCurrentPath;
+  updateWsUi();
+  closeFsModal();
+});
+document.getElementById("ws-clear-btn").addEventListener("click", () => {
+  selectedWsPath = "";
+  updateWsUi();
+});
+// 点击遮罩关闭
+fsModal.addEventListener("click", (event) => {
+  if (event.target === fsModal) closeFsModal();
+});
 
 function bindChip(chip) {
   chip.addEventListener("click", () => {

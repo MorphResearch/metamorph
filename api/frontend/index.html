@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Metamorph · AI Agent</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260902b" />
 </head>
 <body>
   <div class="app">
@@ -52,22 +52,52 @@
       </div>
 
       <div class="composer">
-        <div class="composer-row">
-          <input id="workspace-input" class="workspace-input" type="text" value="default" title="工作区标识" />
-          <label class="ws-label" for="workspace-input">工作区</label>
-          <select id="agent-mode" class="workspace-input" title="Agent 模式">
-            <option value="single">单 Agent</option>
-            <option value="multiagent">自适应多 Agent</option>
-          </select>
-        </div>
-        <div class="composer-row main-row">
+        <!-- 输入卡片：文本域 + 底部工具行 -->
+        <div class="composer-box">
+          <div id="img-previews" class="img-previews" hidden></div>
           <textarea id="prompt-input" rows="1" placeholder="给 Agent 一个任务，回车发送（Shift+Enter 换行）…"></textarea>
-          <button id="send-btn" title="发送">↑</button>
+          <div class="composer-toolbar">
+            <button id="upload-img-btn" class="tb-icon-btn" data-tip="上传图片">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            </button>
+            <input id="img-file-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+            <span class="tb-spacer"></span>
+            <select id="agent-mode" class="mode-select" title="Agent 模式">
+              <option value="single">单 Agent</option>
+              <option value="multiagent">自适应多 Agent</option>
+            </select>
+            <button id="send-btn" class="tb-send" title="发送">↑</button>
+          </div>
+        </div>
+        <!-- 卡片下方：本地工作区行 -->
+        <div class="composer-below">
+          <span class="ws-local">🖥 本地</span>
+          <span id="ws-path-label" class="ws-path-label" hidden></span>
+          <button id="ws-clear-btn" class="ws-clear-btn" title="清除已选文件夹" hidden>✕</button>
+          <span id="ws-default-label" class="ws-default-inline">默认工作区</span>
+          <input id="workspace-input" class="workspace-input" type="text" value="default" title="默认工作区标识" />
+          <button id="pick-folder-btn" class="folder-link">🔗 选择文件夹</button>
         </div>
       </div>
     </main>
   </div>
 
-  <script src="/static/app.js"></script>
+  <!-- 本地文件夹选择弹层 -->
+  <div id="fs-modal" class="fs-modal" hidden>
+    <div class="fs-panel">
+      <div class="fs-head">
+        <span>选择工作空间文件夹</span>
+        <button id="fs-close-btn" class="fs-icon-btn" title="关闭">✕</button>
+      </div>
+      <div id="fs-breadcrumb" class="fs-breadcrumb"></div>
+      <div id="fs-list" class="fs-list"></div>
+      <div class="fs-foot">
+        <span id="fs-current" class="fs-current"></span>
+        <button id="fs-select-btn" class="fs-select-btn">选择此文件夹</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=20260902b"></script>
 </body>
 </html>

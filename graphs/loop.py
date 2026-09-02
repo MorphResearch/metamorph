@@ -57,8 +57,14 @@ def run_loop(
     max_tool_calls: int | None = None,
     max_total_tokens: int | None = None,
     max_latency_seconds: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> str:
-    """Execute the agent loop. Returns the final assistant answer."""
+    """Execute the agent loop. Returns the final assistant answer.
+
+    ``should_stop`` is polled at turn boundaries, between stream chunks and
+    after each tool execution; when it returns True the loop stops early
+    (collaborative cancellation for the UI stop button).
+    """
     adapter = adapter or OpenAICompatibleAdapter(client)
     run_metrics = metrics if metrics is not None else {}
     started = time.perf_counter()
@@ -71,8 +77,13 @@ def run_loop(
         "success": False,
     })
     answer = ""
+    cancelled = False
     try:
         for turn in range(1, max_turns + 1):
+            if should_stop is not None and should_stop():
+                cancelled = True
+                logger.emit("run.cancelled", step=turn, reason="stopped by user")
+                break
             budget_reasons: list[str] = []
             if max_total_tokens is not None and run_metrics["total_tokens"] >= max_total_tokens:
                 budget_reasons.append("token budget exhausted")
@@ -94,6 +105,9 @@ def run_loop(
             try:
                 available_tools = [] if remaining_tool_calls == 0 else tool_schemas(allowed_tool_names)
                 for chunk in adapter.stream(model_name=model_name, messages=convo, tools=available_tools):
+                    if should_stop is not None and should_stop():
+                        cancelled = True
+                        break
                     if chunk.reasoning:
                         reasoning_parts.append(chunk.reasoning)
                         logger.emit("reasoning", text=chunk.reasoning)
@@ -190,6 +204,12 @@ def run_loop(
                     "tool_call_id": tc["id"],
                     "content": result,
                 })
+                if should_stop is not None and should_stop():
+                    cancelled = True
+                    break
+            if cancelled:
+                logger.emit("run.cancelled", step=turn, reason="stopped by user")
+                break
         run_metrics["success"] = bool(answer)
         return answer
     finally:
