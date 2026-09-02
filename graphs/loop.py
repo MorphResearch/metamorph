@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -31,7 +32,7 @@ def _build_conversation(
     same conversation.  They are spliced in *before* the newest user turn so
     the model sees the full conversation context.
     """
-    system_content = SYSTEM_PROMPT
+    system_content = SYSTEM_PROMPT.format(today=datetime.now().strftime("%Y-%m-%d"))
     memories = format_memories(data_dir)
     if memories:
         system_content += "\n\n# 已知的用户长期记忆\n" + memories
@@ -210,6 +211,10 @@ def run_loop(
             if cancelled:
                 logger.emit("run.cancelled", step=turn, reason="stopped by user")
                 break
+        else:
+            # for 循环正常结束 = 达到 max_turns 上限，模型还在调用工具就被截断
+            if not answer:
+                logger.emit("budget.stopped", step=max_turns, reasons=["max turns reached"])
         run_metrics["success"] = bool(answer)
         return answer
     finally:

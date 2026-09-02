@@ -380,10 +380,12 @@ function renderEventsInto(msgEl, events) {
       if (ev.action === "tool_call") {
         // 工具轮：模型叙述渲染为思考段落（无边框浅色文本，像思考流）
         const narrative = answerBuf.trim();
-        if (narrative) {
+        const summary = (ev.summary || "").trim();
+        const thought = narrative || summary;
+        if (thought) {
           const para = document.createElement("div");
           para.className = "chain-thought";
-          para.textContent = narrative;
+          para.textContent = thought;
           chainEl.appendChild(para);
           hasProcess = true;
         }
@@ -467,11 +469,16 @@ function finishMessage(msgEl, run) {
   } else if (run.status === "failed") {
     finalEl.hidden = false;
     finalEl.innerHTML = `<div class="answer-body error-text">任务未成功完成：${escapeHtml(result.error || run.result?.error || "未知错误")}</div>`;
+  } else if (run.status === "cancelled") {
+    finalEl.hidden = false;
+    finalEl.innerHTML = `<div class="answer-body" style="color:var(--text-tertiary)">用户已停止，以上为已产生的中间过程。</div>`;
   }
-  // 完成态：移除顶部状态行与空的执行过程容器，底部仅保留状态小字
+
+  // 完成态：移除顶部状态行；chain（思考过程+工具调用）始终保留可见，供用户回看
   if (statusLine) statusLine.remove();
   const chainEl = msgEl.querySelector(".chain");
-  if (chainEl && !chainEl.querySelector(".chain-item, .thinking")) chainEl.hidden = true;
+  // 仅当 chain 完全空时才隐藏，有任何思考/工具记录都保留
+  if (chainEl && !chainEl.querySelector(".chain-item, .chain-thought, .thinking, .chain-empty")) chainEl.hidden = true;
   const metaLine = document.createElement("div");
   metaLine.className = "msg-time";
   metaLine.innerHTML = `<span class="pill ${meta.cls}" style="font-size:10.5px">${meta.label}</span>`;

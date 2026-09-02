@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -152,6 +153,7 @@ class MultiAgentOrchestrator:
         ], ensure_ascii=False) if lessons else "（无 Active lesson）"
         history_context = json.dumps(history or [], ensure_ascii=False)
         return (
+            f"今天是 {datetime.now().strftime('%Y-%m-%d')}。\n"
             f"你是本任务中的 {role.name}（{role.agent_id}）。\n"
             f"你的职责：{role.objective}\n"
             f"你的关注点：{role.focus}\n"

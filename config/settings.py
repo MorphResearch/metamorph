@@ -19,7 +19,7 @@ class Settings:
     base_url: str | None = None
     api_key_env: str | None = None
     api_token_env: str = "METAMORPH_API_TOKEN"
-    max_steps: int = 12
+    max_steps: int = 50
     max_parallel_agents: int = 8
     max_causal_audits: int = 2
     max_total_tokens: int | None = None
@@ -42,7 +42,7 @@ class Settings:
             base_url=os.getenv("METAMORPH_BASE_URL") or None,
             api_key_env=os.getenv("METAMORPH_API_KEY_ENV") or None,
             api_token_env=os.getenv("METAMORPH_API_TOKEN_ENV", "METAMORPH_API_TOKEN"),
-            max_steps=int(os.getenv("METAMORPH_MAX_STEPS", "12")),
+            max_steps=int(os.getenv("METAMORPH_MAX_STEPS", "50")),
             max_parallel_agents=max(1, int(os.getenv("METAMORPH_MAX_PARALLEL_AGENTS", "8"))),
             max_causal_audits=max(0, int(os.getenv("METAMORPH_MAX_CAUSAL_AUDITS", "2"))),
             max_total_tokens=(int(os.getenv("METAMORPH_MAX_TOTAL_TOKENS", "0")) or None),

@@ -184,25 +184,35 @@ class TaskWorker:
             self.store.append_message(conversation_id, "user", task)
             if answer or not was_cancelled:
                 self.store.append_message(conversation_id, "assistant", answer)
+            # 状态判定：取消 > 未完成（轮次用尽等）> 完成
+            if was_cancelled:
+                run_status = "cancelled"
+            elif not answer:
+                run_status = "failed"
+            else:
+                run_status = "completed"
             result: dict[str, Any] = {
                 "run_id": run_id,
                 "conversation_id": conversation_id,
-                "status": "cancelled" if was_cancelled else "completed",
+                "status": run_status,
                 "answer": answer,
                 "provider": self.client.provider,
                 "model": self.client.model_name,
                 "mode": mode,
             }
+            if run_status == "failed":
+                result["error"] = "达到最大执行轮次，任务未完成（可尝试拆分任务或提高 METAMORPH_MAX_STEPS）"
             if multi_result is None:
                 result["metrics"] = run_metrics
             if multi_result is not None:
                 result.update({k: v for k, v in multi_result.items() if k != "answer"})
             logger.emit("run.evaluated", result=result)
             logger.write_json("result.json", result)
-            # 若用户已取消（cancel() 已落盘 cancelled），不允许 completed 覆盖
+            # 若用户已取消（cancel() 已落盘 cancelled），不允许 completed/failed 覆盖
             current = self.store.get(run_id)
             if current and current.get("status") == "cancelled":
                 result["status"] = "cancelled"
+                result.pop("error", None)
             self.store.update(run_id, result["status"], result)
         except Exception as exc:
             logger.emit("run.error", error=str(exc))
