@@ -101,6 +101,10 @@ def run_loop(
                             emit("reasoning", {"text": chunk.reasoning})
                     if chunk.content:
                         assistant_content += chunk.content
+                        # 回答增量实时落盘，前端轮询即可获得打字机流式效果
+                        logger.emit("answer.delta", step=turn, text=chunk.content)
+                        if emit:
+                            emit("answer.delta", {"text": chunk.content, "step": turn})
                     if chunk.tool_call is not None:
                         tool_calls.append(chunk.tool_call)
                     if chunk.usage:
@@ -116,6 +120,11 @@ def run_loop(
                 reasoning_parts.append(response.reasoning)
                 tool_calls.extend(response.tool_calls)
                 usage.update(response.usage)
+                # 非流式回退路径：整段回答作为一次增量下发，保持前端渲染一致
+                if assistant_content:
+                    logger.emit("answer.delta", step=turn, text=assistant_content)
+                    if emit:
+                        emit("answer.delta", {"text": assistant_content, "step": turn})
 
             if remaining_tool_calls is not None and len(tool_calls) > remaining_tool_calls:
                 logger.emit(

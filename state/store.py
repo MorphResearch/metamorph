@@ -58,6 +58,22 @@ class RunStore:
                 "CREATE INDEX IF NOT EXISTS idx_msg_conv "
                 "ON conversation_messages(conversation_id, id)"
             )
+            self._migrate_schema(connection)
+
+    def _migrate_schema(self, connection: sqlite3.Connection) -> None:
+        """旧版本数据库升级：为缺失的列自动补齐，保留历史数据。
+
+        旧 schema 的 runs 表没有 conversation_id 列，这里补列后把每条
+        旧记录回填为独立对话（conversation_id = run_id），避免接口崩溃。
+        """
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(runs)").fetchall()}
+        if "conversation_id" not in columns:
+            connection.execute(
+                "ALTER TABLE runs ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''"
+            )
+            connection.execute(
+                "UPDATE runs SET conversation_id = run_id WHERE conversation_id = ''"
+            )
 
     def create(self, task: str, workspace: Path, conversation_id: str | None = None) -> tuple[str, str]:
         """Create a run. Returns (run_id, conversation_id)."""

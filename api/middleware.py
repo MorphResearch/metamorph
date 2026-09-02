@@ -49,6 +49,8 @@ def static_file(
     handler.send_response(200)
     handler.send_header("Content-Type", content_type or "application/octet-stream")
     handler.send_header("Content-Length", str(len(body)))
+    # no-cache：每次协商校验，保证前端改动即时生效，避免浏览器启发式缓存旧资源
+    handler.send_header("Cache-Control", "no-cache")
     handler.end_headers()
     handler.wfile.write(body)
     return True

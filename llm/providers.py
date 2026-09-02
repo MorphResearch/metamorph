@@ -36,7 +36,7 @@ PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
         "api_key_env": "ANTHROPIC_API_KEY",
     },
     "sensenova": {
-        "model": "deepseek-v4-flash",
+        "model": "sensenova-6.8-flash-lite",
         "base_url": "https://token.sensenova.cn/v1",
         "api_key_env": "SENSENOVA_API_KEY",
     },

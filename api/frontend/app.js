@@ -124,11 +124,8 @@ async function loadHistory() {
     data.forEach((conversation) => {
       const li = document.createElement("li");
       if (conversation.conversation_id === state.currentConversationId) li.classList.add("active");
-      const preview = conversation.last_message || conversation.task || "(无描述)";
       li.innerHTML =
-        `<span class="h-task">${escapeHtml(conversation.task || "(无描述)")}</span>` +
-        `<span class="h-preview">${escapeHtml(preview)}</span>` +
-        `<span class="h-meta"><span>${conversation.run_count || 0} 次任务</span><span class="h-id">${escapeHtml(conversation.conversation_id)}</span></span>`;
+        `<span class="h-task">${escapeHtml(conversation.task || "(无描述)")}</span>`;
       li.addEventListener("click", () => loadConversationIntoChat(conversation.conversation_id));
       list.appendChild(li);
     });
@@ -142,7 +139,12 @@ function addUserMessage(text) {
   removeWelcome();
   const div = document.createElement("div");
   div.className = "msg user";
-  div.innerHTML = `<div class="bubble"><div class="message-label">你</div>${textToHtml(text)}</div>`;
+  const time = new Date().toTimeString().slice(0, 5);
+  div.innerHTML =
+    `<div class="msg-col">` +
+      `<div class="bubble">${textToHtml(text)}</div>` +
+      `<div class="msg-time">${time}</div>` +
+    `</div>`;
   messagesEl.appendChild(div);
   scrollBottom();
   return div;
@@ -155,10 +157,11 @@ function addAssistantMessage(runId) {
   if (runId) div.dataset.runId = runId;
   div.innerHTML =
     `<div class="avatar">◈</div>` +
-    `<div class="bubble">` +
+    `<div class="msg-col">` +
+      `<div class="ai-name">Metamorph</div>` +
       `<div class="status-line"><span class="spinner"></span><span class="status-text">正在思考…</span></div>` +
       `<div class="chain"></div>` +
-      `<div class="final-answer" hidden></div>` +
+      `<div class="final-answer" hidden><div class="answer-body"></div></div>` +
     `</div>`;
   messagesEl.appendChild(div);
   scrollBottom();
@@ -170,9 +173,11 @@ function ensureThinkingPanel(msgEl) {
   if (panel && panel.isConnected) return panel;
   panel = document.createElement("details");
   panel.className = "thinking";
-  panel.open = true;
-  panel.innerHTML = `<summary>💭 思考过程</summary><div class="think-body"></div>`;
+  panel.open = !msgEl._thinkCollapsed;
+  panel.innerHTML = `<summary><span class="think-icon">✦</span> 深度思考<span class="think-caret"></span></summary><div class="think-body"></div>`;
   panel._buf = "";
+  // 记录用户手动折叠状态，轮询重建时不再强制展开
+  panel.addEventListener("toggle", () => { msgEl._thinkCollapsed = !panel.open; });
   msgEl.querySelector(".chain").appendChild(panel);
   msgEl._thinkPanel = panel;
   return panel;
@@ -181,23 +186,9 @@ function ensureThinkingPanel(msgEl) {
 function buildChainItem(ev, msgEl) {
   const type = ev.type || "event";
 
-  if (type === "reasoning") {
-    const panel = ensureThinkingPanel(msgEl);
-    if (ev.text) {
-      panel._buf += ev.text;
-      panel.querySelector(".think-body").textContent = panel._buf;
-    }
+  if (type === "reasoning" || type === "model.decision") {
+    // reasoning 与 model.decision 由 renderEventsInto 统一处理（需要跨事件维护流式缓冲）
     return null;
-  }
-
-  if (type === "model.decision") {
-    const wrap = document.createElement("div");
-    wrap.className = "chain-item think";
-    wrap.innerHTML =
-      `<div class="ci-head"><span class="ci-dot"></span><span class="ci-title">思考 · 第 ${escapeHtml(ev.step ?? "?")} 步</span>` +
-      `<span class="ci-action">动作: ${escapeHtml(ev.action || "")}</span></div>` +
-      `<div class="ci-body">${textToHtml(ev.summary || "（模型未返回思考摘要）")}</div>`;
-    return wrap;
   }
 
   if (type === "tool.completed") {
@@ -266,16 +257,76 @@ function buildChainItem(ev, msgEl) {
 
 function renderEventsInto(msgEl, events) {
   const chainEl = msgEl.querySelector(".chain");
+  const finalEl = msgEl.querySelector(".final-answer");
+  const answerBody = finalEl.querySelector(".answer-body");
   chainEl.innerHTML = "";
   msgEl._thinkPanel = null;
-  let hasContent = false;
+
+  let reasoningBuf = "";   // 真实思考链缓冲（模型 reasoning 字段）
+  let answerBuf = "";      // 当前轮回答流式缓冲
+  let hasProcess = false;  // 是否有可展示的执行过程
+
   events.forEach((ev) => {
+    const type = ev.type || "event";
+
+    if (type === "reasoning") {
+      if (ev.text) {
+        reasoningBuf += ev.text;
+        const panel = ensureThinkingPanel(msgEl);
+        panel._buf = reasoningBuf;
+        panel.querySelector(".think-body").textContent = reasoningBuf;
+      }
+      return;
+    }
+
+    if (type === "answer.delta") {
+      answerBuf += ev.text || "";
+      // 有可见内容才展开回答区；展示时去掉首尾空白，避免 pre-wrap 下开头换行产生空行
+      if (answerBuf.trim()) {
+        finalEl.hidden = false;
+        answerBody.textContent = answerBuf.trim();
+      }
+      return;
+    }
+
+    if (type === "model.decision") {
+      if (ev.action === "tool_call") {
+        // 工具轮：把该轮流出的有效文本归档为步骤叙述，回答区清空等待最终答案
+        // 注意 trim 判断：模型常在工具调用前只输出换行/空格，纯空白不渲染卡片
+        const narrative = answerBuf.trim();
+        if (narrative) {
+          const wrap = document.createElement("div");
+          wrap.className = "chain-item step";
+          wrap.innerHTML =
+            `<div class="ci-head"><span class="ci-dot"></span><span class="ci-title">第 ${escapeHtml(ev.step ?? "?")} 步</span>` +
+            `<span class="ci-status">工具调用</span></div>` +
+            `<div class="ci-body">${textToHtml(narrative)}</div>`;
+          chainEl.appendChild(wrap);
+          hasProcess = true;
+        }
+        answerBuf = "";
+        answerBody.textContent = "";
+        finalEl.hidden = true;
+      }
+      // action === "finish"：最终回答就是流式内容本身，不再渲染重复卡片
+      return;
+    }
+
     const item = buildChainItem(ev, msgEl);
-    if (item) { chainEl.appendChild(item); hasContent = true; }
+    if (item) { chainEl.appendChild(item); hasProcess = true; }
   });
+
+  // 思考面板：只有真实 reasoning 才存在；运行中展开，完成后自动折叠
   const panel = msgEl._thinkPanel;
-  if (panel && panel.querySelector(".think-body").textContent) hasContent = true;
-  if (!hasContent) chainEl.innerHTML = `<div class="chain-empty">正在连接模型…</div>`;
+  if (panel) {
+    if (!state.busy && msgEl.dataset.runId !== state.currentRunId) panel.open = false;
+  }
+
+  if (!hasProcess && !reasoningBuf && !answerBuf) {
+    chainEl.innerHTML = `<div class="chain-empty">正在连接模型…</div>`;
+  } else if (!hasProcess && !reasoningBuf) {
+    chainEl.innerHTML = "";
+  }
 }
 
 function renderRunSummary(result) {
@@ -321,20 +372,27 @@ function finishMessage(msgEl, run) {
   if (spinner) spinner.remove();
   const result = run.result || {};
 
+  // 运行结束：思考面板自动折叠（保留内容可展开回看）
+  const panel = msgEl._thinkPanel;
+  if (panel) panel.open = false;
+  msgEl.classList.add("done");
+
   if (result.answer) {
     finalEl.hidden = false;
-    finalEl.innerHTML = `<div class="answer-body">${textToHtml(result.answer)}</div>` + renderRunSummary(result);
+    // 首尾 trim：模型回答常以换行开头，pre-wrap 下会渲染成顶部空行
+    finalEl.innerHTML = `<div class="answer-body">${textToHtml(result.answer.trim())}</div>` + renderRunSummary(result);
   } else if (run.status === "failed") {
     finalEl.hidden = false;
-    finalEl.innerHTML = `<div class="answer-body">任务未成功完成（失败）：${escapeHtml(result.error || run.result?.error || "未知错误")}</div>`;
+    finalEl.innerHTML = `<div class="answer-body error-text">任务未成功完成：${escapeHtml(result.error || run.result?.error || "未知错误")}</div>`;
   }
-  if (statusLine) {
-    statusLine.innerHTML = `<span class="pill ${meta.cls}" style="font-size:11px">${meta.label}</span>` +
-      (result.steps != null ? ` <span class="mini">${result.steps} 步</span>` : "") +
-      (result.duration_seconds != null ? ` <span class="mini">${result.duration_seconds}s</span>` : "") +
-      (result.model ? ` <span class="mini">${escapeHtml(result.model)}</span>` : "") +
-      (result.mode === "multiagent" ? ` <span class="mini">自适应多 Agent</span>` : "");
-  }
+  // 完成态：移除顶部状态行与空的执行过程容器，底部仅保留状态小字
+  if (statusLine) statusLine.remove();
+  const chainEl = msgEl.querySelector(".chain");
+  if (chainEl && !chainEl.querySelector(".chain-item, .thinking")) chainEl.hidden = true;
+  const metaLine = document.createElement("div");
+  metaLine.className = "msg-time";
+  metaLine.innerHTML = `<span class="pill ${meta.cls}" style="font-size:10.5px">${meta.label}</span>`;
+  msgEl.querySelector(".msg-col").appendChild(metaLine);
   if (run.run_id === state.currentRunId) {
     state.busy = false;
     setComposerDisabled(false);
@@ -452,7 +510,7 @@ function startPolling(msgEl, runId) {
     if (!state.currentRunId || state.currentRunId !== runId || state.polling) return;
     state.polling = true;
     try { await refreshRun(msgEl, runId); } finally { state.polling = false; }
-  }, 1500);
+  }, 400);
 }
 
 function stopPolling() {
