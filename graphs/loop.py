@@ -170,6 +170,15 @@ def run_loop(
                 break
 
             run_metrics["tool_calls"] += len(tool_calls)
+            # 防御性过滤：确保 name 和 arguments 非空，避免 API 400
+            valid_tool_calls = [
+                tc for tc in tool_calls
+                if tc.get("name") and tc.get("arguments")
+            ]
+            if not valid_tool_calls and tool_calls:
+                logger.emit("tool.filtered_empty", step=turn, count=len(tool_calls))
+                answer = assistant_content
+                break
             assistant_msg: dict[str, Any] = {
                 "role": "assistant",
                 "content": assistant_content or None,
@@ -179,7 +188,7 @@ def run_loop(
                         "type": "function",
                         "function": {"name": tc["name"], "arguments": tc["arguments"]},
                     }
-                    for tc in tool_calls
+                    for tc in valid_tool_calls
                 ],
             }
             # DeepSeek thinking models require the reasoning trace to be
@@ -189,7 +198,7 @@ def run_loop(
                 assistant_msg["reasoning_content"] = reasoning
             convo.append(assistant_msg)
 
-            for tc in tool_calls:
+            for tc in valid_tool_calls:
                 name = tc["name"]
                 try:
                     arguments = json.loads(tc["arguments"] or "{}")

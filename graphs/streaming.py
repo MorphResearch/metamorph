@@ -58,7 +58,16 @@ def iter_stream(
                     tool_calls[idx]["arguments"] += tc.function.arguments
 
     # Yield the fully accumulated tool calls at end of stream.
-    for tc in tool_calls:
+    # 过滤掉 name 为空的无效 tool_call（部分模型会返回空 name 的 delta，
+    # 直接转发会导致 API 400: function/name cannot be empty）。
+    # 同时确保 arguments 非空（默认 "{}"）和 id 有值，避免 API 400。
+    for idx, tc in enumerate(tool_calls):
+        if not tc.get("name"):
+            continue
+        if not tc.get("arguments"):
+            tc["arguments"] = "{}"
+        if not tc.get("id"):
+            tc["id"] = f"call_{idx}_{tc['name']}"
         yield ParsedChunk(tool_call=tc)
 
 
@@ -101,10 +110,13 @@ def non_streaming_call(
     )
     msg = resp.choices[0].message
     tool_calls = []
-    for tc in (msg.tool_calls or []):
+    for idx, tc in enumerate(msg.tool_calls or []):
+        name = (tc.function.name if tc.function else "") or ""
+        if not name:
+            continue
         tool_calls.append({
-            "id": tc.id,
-            "name": tc.function.name,
-            "arguments": tc.function.arguments,
+            "id": tc.id or f"call_{idx}_{name}",
+            "name": name,
+            "arguments": (tc.function.arguments if tc.function else "") or "{}",
         })
     return msg.content or "", tool_calls

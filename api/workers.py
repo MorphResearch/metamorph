@@ -184,7 +184,7 @@ class TaskWorker:
             self.store.append_message(conversation_id, "user", task)
             if answer or not was_cancelled:
                 self.store.append_message(conversation_id, "assistant", answer)
-            # 状态判定：取消 > 未完成（轮次用尽等）> 完成
+            # 状态判定：取消 > 未完成 > 完成
             if was_cancelled:
                 run_status = "cancelled"
             elif not answer:
@@ -201,7 +201,12 @@ class TaskWorker:
                 "mode": mode,
             }
             if run_status == "failed":
-                result["error"] = "达到最大执行轮次，任务未完成（可尝试拆分任务或提高 METAMORPH_MAX_STEPS）"
+                # 根据实际执行轮次区分失败原因，避免误导
+                llm_calls = run_metrics.get("llm_calls", 0)
+                if llm_calls >= self.settings.max_steps:
+                    result["error"] = "达到最大执行轮次，任务未完成（可尝试拆分任务或提高 METAMORPH_MAX_STEPS）"
+                else:
+                    result["error"] = "模型未输出最终回答（可能是输出为空或提前结束）"
             if multi_result is None:
                 result["metrics"] = run_metrics
             if multi_result is not None:

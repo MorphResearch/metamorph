@@ -98,6 +98,31 @@ metamorph serve --port 8787
 打开 http://127.0.0.1:8787 即可在页面中与 agent 对话，实时看到：
 **思考过程（可折叠）+ 工具调用卡片 + 最终回答**。
 
+### 使用 Sensenova 启动（推荐配置）
+
+模型 `sensenova-6.8-flash-lite`，API Key 通过环境变量传入，**不写入文件、不落盘**。
+
+```powershell
+# Windows PowerShell
+$env:METAMORPH_ALLOW_WRITE="1"          # 开启后 agent 才能使用 write_file 等可变工具
+$env:SENSENOVA_API_KEY="sk-xxx"          # 替换为你的真实 key，仅当前终端会话有效
+python main.py serve --host 127.0.0.1 --port 8787 --provider sensenova --model sensenova-6.8-flash-lite
+```
+
+```bash
+# macOS / Linux
+export METAMORPH_ALLOW_WRITE=1
+export SENSENOVA_API_KEY="sk-xxx"
+python main.py serve --host 127.0.0.1 --port 8787 --provider sensenova --model sensenova-6.8-flash-lite
+```
+
+启动后访问 http://127.0.0.1:8787 。常用可选环境变量：
+
+- `METAMORPH_MAX_STEPS`：单任务最大执行轮次（默认 50）。
+- `METAMORPH_API_TOKEN`：为本地 API 开启 Bearer token 认证。
+
+> 重启前如遇端口占用，用 `Get-NetTCPConnection -LocalPort 8787` 查残留进程并结束，再重新启动。
+
 ### 命令行直接运行
 
 ```bash
