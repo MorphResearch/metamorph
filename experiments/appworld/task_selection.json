@@ -1,0 +1,42 @@
+{
+  "schema_version": "1",
+  "benchmark": "AppWorld",
+  "appworld_commit": "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
+  "selection_is_frozen_before_model_run": true,
+  "selection_method": "sha256(task_id + ':' + selection_seed), sorted by digest",
+  "sets": {
+    "pilot": {
+      "purpose": "运行稳定性、权限、evaluator 和预算 smoke；不作为论文主结果",
+      "splits": {
+        "train": {"count": 12, "selection_seed": 1801},
+        "dev": {"count": 12, "selection_seed": 1802}
+      }
+    },
+    "e1_main": {
+      "purpose": "E1 四条件系统级比较",
+      "splits": {
+        "test_normal": {"count": 50, "selection_seed": 1811},
+        "test_challenge": {"count": 50, "selection_seed": 1812}
+      },
+      "stratify_by": ["official_split", "task_generator", "scenario_id"]
+    },
+    "e2_main": {
+      "purpose": "E2 固定上下文组件和通信边因果审计",
+      "reuse_task_set": "e1_main",
+      "stratify_by": ["official_split", "task_generator", "scenario_id"]
+    },
+    "full_test_extension": {
+      "purpose": "资源允许时的扩展，不改变 e1_main/e2_main 的冻结任务集",
+      "splits": {
+        "test_normal": {"count": "all"},
+        "test_challenge": {"count": "all"}
+      }
+    }
+  },
+  "forbidden": [
+    "按模型结果选择或删除 test task",
+    "使用 test ground-truth solution 生成 Adaptive 或 Oracle 标签",
+    "将 AppWorld metadata difficulty 直接当作 test Oracle",
+    "在正式 test 运行期间更新任务集、router 规则或 lesson store"
+  ]
+}

@@ -1,4 +1,9 @@
-# Metamorph 论文实验协议（v0.1）
+# Metamorph 论文实验协议（v0.1，历史版本）
+
+> 本文档保留作历史记录，内容已经过期。当前 workshop 以
+> [AppWorld Workshop 实验配置](docs/zh-CN/APPWORLD_EXPERIMENT_CONFIG.md) 和
+> [Workshop 论文整体架构](docs/zh-CN/PAPER_ARCHITECTURE.md) 为准：正式实验只保留
+> E1 系统级比较和 E2 因果组件/通信边审计；E3 lesson transfer 延后到大会议版本。
 
 本文档冻结 workshop 论文阶段的统一实验条件，避免不同 benchmark、不同运行器
 和不同预算口径之间不可比较。

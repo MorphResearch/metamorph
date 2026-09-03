@@ -17,6 +17,7 @@ serve.err
 
 # Downloaded benchmark repositories, datasets, environments, and run outputs
 benchmarks/browsecomp-plus/
+benchmarks/appworld/
 benchmarks/tau2-bench/
 benchmarks/tau3-bench/
 benchmarks/workbench/

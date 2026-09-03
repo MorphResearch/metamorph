@@ -182,6 +182,11 @@ def run_loop(
                     for tc in tool_calls
                 ],
             }
+            # DeepSeek thinking models require the reasoning trace to be
+            # returned with the assistant tool-call message on the next turn.
+            # Omitting it causes a 400 in multi-turn tool use.
+            if reasoning:
+                assistant_msg["reasoning_content"] = reasoning
             convo.append(assistant_msg)
 
             for tc in tool_calls:

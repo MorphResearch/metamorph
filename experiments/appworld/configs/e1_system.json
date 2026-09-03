@@ -1,0 +1,83 @@
+{
+  "schema_version": "1",
+  "experiment_id": "appworld_e1_system_v1",
+  "benchmark": "AppWorld",
+  "stage": "workshop_main",
+  "task_set": "e1_main",
+  "lessons": {"enabled": false, "store_snapshot": null},
+  "model": {
+    "provider": "from_environment",
+    "model_name_env": "METAMORPH_MODEL",
+    "api_base_env": "METAMORPH_BASE_URL",
+    "temperature": 0.0,
+    "prompt_version": "freeze_before_run",
+    "tool_schema_version": "appworld_official_freeze_before_run"
+  },
+  "budget": {
+    "max_steps": 20,
+    "max_errors": 5,
+    "max_total_tokens": 30000,
+    "max_tool_calls": 12,
+    "max_latency_seconds": 180,
+    "allow_write": true,
+    "tool_policy": "official_appworld_toolkit_only",
+    "router_counts_toward_budget": true
+  },
+  "seeds": [300],
+  "conditions": [
+    {
+      "id": "S0",
+      "route": "single_agent",
+      "controller": "single_agent",
+      "purpose": "single-agent baseline"
+    },
+    {
+      "id": "Complex-only",
+      "route": "complex",
+      "controller": "S3",
+      "purpose": "always use the complex scaffold"
+    },
+    {
+      "id": "Adaptive",
+      "route": "planner_router",
+      "controller_if_simple": "single_agent",
+      "controller_if_complex": "S3",
+      "fallback_route": "complex",
+      "single_agent_confidence_threshold": 0.65,
+      "purpose": "system-level adaptive routing"
+    },
+    {
+      "id": "Oracle",
+      "route": "frozen_human_label",
+      "controller_if_simple": "single_agent",
+      "controller_if_complex": "S3",
+      "label_file": "experiments/appworld/oracle_labels/appworld_test_labels.json",
+      "purpose": "non-deployable routing upper bound"
+    }
+  ],
+  "metrics": {
+    "primary": ["official_reward", "task_completion_rate", "budget_constrained_completion"],
+    "cost": ["input_tokens", "output_tokens", "total_tokens", "latency_seconds", "tool_calls"],
+    "governance": ["safety_incidents", "tool_errors", "budget_exhaustion", "write_actions", "json_contract_violations"],
+    "routing": ["route_agreement_with_oracle", "complex_under_routing", "simple_unnecessary_escalation"]
+  },
+  "outputs": {
+    "root": "experiments/appworld/runs/appworld_e1_system_v1",
+    "required_manifest": "manifest.json",
+    "required_task_manifest": "task_manifest.json",
+    "required_result_per_task": "runs/<condition>/<task_id>/<seed>/result.json",
+    "required_trace_per_task": "traces/<condition>/<task_id>/<seed>/"
+  },
+  "statistical_plan": {
+    "pairing": "same task_id across all conditions",
+    "confidence_interval": "task_level_paired_bootstrap_95_percent",
+    "primary_contrasts": [
+      "Adaptive - S0",
+      "Adaptive - Complex-only",
+      "Oracle - Adaptive",
+      "Complex-only - S0"
+    ],
+    "failure_policy": "retain and categorize; never silently drop"
+  },
+  "status": "configuration_only_do_not_run_until_runner_and_manifest_are_verified"
+}
