@@ -363,6 +363,7 @@ class AppWorldExperimentRunner:
             ),
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
             require_token_usage=self.formal,
+            request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
         )
         try:
             route_record: dict[str, Any] | None = None
@@ -450,6 +451,7 @@ class AppWorldExperimentRunner:
             enable_repair=True,
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
             require_token_usage=self.formal,
+            request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
         )
         try:
             replay = controller.replay_masked_edge(

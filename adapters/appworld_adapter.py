@@ -9,7 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import signal
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol
@@ -41,6 +44,43 @@ from .appworld_contracts import (
 READ_METHODS = {"GET"}
 LOGIN_API = "login"
 MAX_TOOL_OUTPUT_CHARS = 20_000
+
+
+class ProviderRequestTimeout(TimeoutError):
+    """Hard wall-clock timeout for one model request in the experiment runner."""
+
+
+@contextmanager
+def hard_provider_timeout(seconds: float | None):
+    """Interrupt a stalled synchronous provider call on the main POSIX thread.
+
+    SDK transport timeouts may be inactivity-based and reset while a proxy
+    slowly streams a response body. Experiments need a true wall-clock bound
+    so a stalled request becomes a persisted failed arm rather than blocking a
+    paired matrix. Other threads/platforms retain the SDK timeout.
+    """
+
+    if (
+        seconds is None
+        or seconds <= 0
+        or not hasattr(signal, "SIGALRM")
+        or threading.current_thread() is not threading.main_thread()
+    ):
+        yield
+        return
+
+    def _raise_timeout(signum: int, frame: Any) -> None:
+        del signum, frame
+        raise ProviderRequestTimeout(f"provider request exceeded {seconds:.3f}s hard timeout")
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, float(seconds))
+    signal.signal(signal.SIGALRM, _raise_timeout)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 class PhaseModel(Protocol):
@@ -179,6 +219,7 @@ class AppWorldController:
         max_output_tokens: int = 4096,
         initial_usage: dict[str, Any] | None = None,
         require_token_usage: bool = False,
+        request_timeout_seconds: float | None = None,
     ) -> None:
         self.world = world
         self.model = model
@@ -190,6 +231,7 @@ class AppWorldController:
         self.enable_repair = enable_repair
         self.max_output_tokens = max_output_tokens
         self.require_token_usage = require_token_usage
+        self.request_timeout_seconds = request_timeout_seconds
         self.traces: dict[str, PhaseTrace] = {}
         self.checkpoints: dict[str, dict[str, Any]] = {}
         self._function_docs = list(world.task.api_docs.function_calling())
@@ -361,12 +403,13 @@ class AppWorldController:
         try:
             while True:
                 self.ledger.before_model_call(_estimate_tokens(messages, tools), self.max_output_tokens)
-                response = self.model.complete(
-                    phase=phase,
-                    messages=messages,
-                    tools=tools,
-                    max_output_tokens=self.max_output_tokens,
-                )
+                with hard_provider_timeout(self.request_timeout_seconds):
+                    response = self.model.complete(
+                        phase=phase,
+                        messages=messages,
+                        tools=tools,
+                        max_output_tokens=self.max_output_tokens,
+                    )
                 content, tool_calls, usage = _response_parts(response)
                 has_token_usage = any(
                     key in usage

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from adapters.appworld_adapter import AppWorldController
+from adapters.appworld_adapter import AppWorldController, ProviderRequestTimeout, hard_provider_timeout
 from adapters.appworld_budget import AppWorldBudgetLedger, BudgetExhausted, BudgetLimits
 from adapters.appworld_code_executor import (
     CODE_EXECUTOR_MARKER,
@@ -214,6 +215,11 @@ def limits(**overrides):
 
 
 class AppWorldContractTests(unittest.TestCase):
+    def test_hard_provider_timeout_interrupts_main_thread_call(self):
+        with self.assertRaises(ProviderRequestTimeout):
+            with hard_provider_timeout(0.02):
+                time.sleep(0.2)
+
     def test_code_batch_validator_rejects_dynamic_or_unsafe_python(self):
         with self.assertRaises(BatchCodeRejected):
             validate_batch_code("import os\nos.system('echo unsafe')", allowed_api_names={"fake__read"})
