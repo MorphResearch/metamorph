@@ -292,6 +292,34 @@ class AppWorldExperimentRunner:
             limits=limits,
         )
 
+    def _close_world(self, world: Any, *, restored_checkpoint: bool = False) -> None:
+        """Close a world without letting AppWorld's load-state freezer bug erase an arm.
+
+        AppWorld.load_state() calls AppWorld.close_all(), which stops the
+        instance freezer but leaves the instance carrying that stopped freezer.
+        A later instance.close() can call freezegun.stop() a second time and
+        raise ``IndexError``/``AttributeError``.  The run result and checkpoint
+        are already valid at that point, so tolerate only those documented
+        cleanup signatures and finally clear AppWorld's class-level globals.
+        """
+
+        cleanup_error: Exception | None = None
+        try:
+            world.close()
+        except (AttributeError, IndexError) as exc:
+            if not restored_checkpoint:
+                raise
+            cleanup_error = exc
+        if self.world_factory is default_world_factory:
+            with appworld_root(self.appworld_dir):
+                from appworld import AppWorld
+
+                AppWorld.close_all()
+        if cleanup_error is not None:
+            # The specific duplicate-freezer cleanup failure is intentionally
+            # non-fatal; class-level cleanup above restored the process state.
+            return
+
     def _result_base(self, condition: str, task_id: str, seed: int) -> dict[str, Any]:
         return {
             "schema_version": "appworld.result.v1",
@@ -402,7 +430,7 @@ class AppWorldExperimentRunner:
                 "failure_category": type(exc).__name__,
             }
         finally:
-            world.close()
+            self._close_world(world)
         return self._persist_result(run_dir, result)
 
     def run_edge_intervention(self, edge_condition: dict[str, Any], task_id: str, seed: int) -> dict[str, Any]:
@@ -495,7 +523,7 @@ class AppWorldExperimentRunner:
                 "failure_category": type(exc).__name__,
             }
         finally:
-            world.close()
+            self._close_world(world, restored_checkpoint=True)
         return self._persist_result(run_dir, result)
 
     def run_task(self, task_id: str, seed: int, condition_ids: set[str] | None = None) -> list[dict[str, Any]]:
