@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from adapters.appworld_adapter import AppWorldController, ProviderRequestTimeout, hard_provider_timeout
+from adapters.appworld_adapter import AppWorldController, ProviderRequestTimeout, isolated_provider_request
 from adapters.appworld_budget import AppWorldBudgetLedger, BudgetExhausted, BudgetLimits
 from adapters.appworld_code_executor import (
     CODE_EXECUTOR_MARKER,
@@ -215,10 +215,9 @@ def limits(**overrides):
 
 
 class AppWorldContractTests(unittest.TestCase):
-    def test_hard_provider_timeout_interrupts_main_thread_call(self):
+    def test_isolated_provider_request_enforces_hard_timeout(self):
         with self.assertRaises(ProviderRequestTimeout):
-            with hard_provider_timeout(0.02):
-                time.sleep(0.2)
+            isolated_provider_request(lambda: time.sleep(0.2), 0.02)
 
     def test_code_batch_validator_rejects_dynamic_or_unsafe_python(self):
         with self.assertRaises(BatchCodeRejected):

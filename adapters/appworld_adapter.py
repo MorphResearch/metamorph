@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import pickle
 import re
-import signal
-import threading
+import select
 import time
-from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol
@@ -47,40 +47,53 @@ MAX_TOOL_OUTPUT_CHARS = 20_000
 
 
 class ProviderRequestTimeout(TimeoutError):
-    """Hard wall-clock timeout for one model request in the experiment runner."""
+    """Hard wall-clock timeout for one isolated provider request."""
 
 
-@contextmanager
-def hard_provider_timeout(seconds: float | None):
-    """Interrupt a stalled synchronous provider call on the main POSIX thread.
+def isolated_provider_request(call: Callable[[], Any], seconds: float | None) -> Any:
+    """Run one provider request in a child process with a true wall-clock cap.
 
-    SDK transport timeouts may be inactivity-based and reset while a proxy
-    slowly streams a response body. Experiments need a true wall-clock bound
-    so a stalled request becomes a persisted failed arm rather than blocking a
-    paired matrix. Other threads/platforms retain the SDK timeout.
+    OpenAI-compatible transports can keep a blocking SSL read alive despite an
+    SDK timeout and Python signals. Forking only real provider calls gives the
+    parent a killable boundary while leaving in-process fake models deterministic
+    in unit tests. The child returns only the normalized response or exception
+    metadata; it never mutates benchmark state.
     """
 
-    if (
-        seconds is None
-        or seconds <= 0
-        or not hasattr(signal, "SIGALRM")
-        or threading.current_thread() is not threading.main_thread()
-    ):
-        yield
-        return
+    if seconds is None or seconds <= 0 or os.name != "posix":
+        return call()
+    read_fd, write_fd = os.pipe()
+    child_pid = os.fork()
+    if child_pid == 0:  # pragma: no cover - child exits before coverage collection
+        os.close(read_fd)
+        try:
+            payload: tuple[Any, ...] = ("ok", call())
+        except BaseException as exc:  # preserve provider errors without killing parent
+            payload = ("error", type(exc).__name__, str(exc))
+        try:
+            with os.fdopen(write_fd, "wb") as stream:
+                pickle.dump(payload, stream)
+        finally:
+            os._exit(0)
 
-    def _raise_timeout(signum: int, frame: Any) -> None:
-        del signum, frame
-        raise ProviderRequestTimeout(f"provider request exceeded {seconds:.3f}s hard timeout")
-
-    previous_handler = signal.getsignal(signal.SIGALRM)
-    previous_timer = signal.setitimer(signal.ITIMER_REAL, float(seconds))
-    signal.signal(signal.SIGALRM, _raise_timeout)
+    os.close(write_fd)
     try:
-        yield
+        ready, _, _ = select.select([read_fd], [], [], float(seconds))
+        if not ready:
+            os.kill(child_pid, 15)
+            os.waitpid(child_pid, 0)
+            raise ProviderRequestTimeout(f"provider request exceeded {seconds:.3f}s hard timeout")
+        with os.fdopen(read_fd, "rb") as stream:
+            payload = pickle.load(stream)
+        os.waitpid(child_pid, 0)
     finally:
-        signal.setitimer(signal.ITIMER_REAL, *previous_timer)
-        signal.signal(signal.SIGALRM, previous_handler)
+        try:
+            os.close(read_fd)
+        except OSError:
+            pass
+    if payload[0] == "ok":
+        return payload[1]
+    raise RuntimeError(f"provider child failed: {payload[1]}: {payload[2]}")
 
 
 class PhaseModel(Protocol):
@@ -110,6 +123,7 @@ class ProviderPhaseModel:
         self.adapter = client_bundle.adapter
         self.model_name = client_bundle.model_name
         self.provider = client_bundle.provider
+        self.isolate_requests = True
         self.temperature = temperature
         self.seed = seed
         self.request_timeout_seconds = request_timeout_seconds
@@ -403,13 +417,17 @@ class AppWorldController:
         try:
             while True:
                 self.ledger.before_model_call(_estimate_tokens(messages, tools), self.max_output_tokens)
-                with hard_provider_timeout(self.request_timeout_seconds):
-                    response = self.model.complete(
+                call = lambda: self.model.complete(
                         phase=phase,
                         messages=messages,
                         tools=tools,
                         max_output_tokens=self.max_output_tokens,
                     )
+                response = (
+                    isolated_provider_request(call, self.request_timeout_seconds)
+                    if getattr(self.model, "isolate_requests", False)
+                    else call()
+                )
                 content, tool_calls, usage = _response_parts(response)
                 has_token_usage = any(
                     key in usage
