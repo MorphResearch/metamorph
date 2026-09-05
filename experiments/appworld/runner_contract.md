@@ -33,7 +33,7 @@ Full    = planner(read-only) → executor → verifier(read-only) → [NOT_VERIF
 
 ## 预算、超时和安全执行
 
-所有模型阶段与每个真实 API 调用共享一个 per-task ledger。请求级 timeout 是配置的必填字段，且不得超过 task latency budget；provider timeout/connection error 必须持久化为失败 result，不能留下悬挂进程。
+所有模型阶段与每个真实 API 调用共享一个 per-task ledger。请求级 timeout 是配置的必填字段，且不得超过 task latency budget；真实 provider 请求在 macOS-safe 的 spawn 子进程中执行，父进程到时终止子进程。provider timeout/connection error 必须持久化为失败 result，不能留下悬挂进程。
 
 Planner/Verifier 只有 GET/login 权限；Executor/Repair 可写。`metamorph__execute_code` 仅允许当前阶段白名单 API、局部变量、`if` 和 `for`，禁止 import、文件/网络、动态调用、定义、`while` 和私有属性。一个 code batch 可包含多次 API 调用，但每次实际调用均单独计入 trace/API/write 预算。
 

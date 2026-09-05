@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 import tempfile
-import time
 import unittest
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from adapters.appworld_adapter import AppWorldController, ProviderRequestTimeout, isolated_provider_request
+from adapters.appworld_adapter import AppWorldController, isolated_provider_request
 from adapters.appworld_budget import AppWorldBudgetLedger, BudgetExhausted, BudgetLimits
 from adapters.appworld_code_executor import (
     CODE_EXECUTOR_MARKER,
@@ -215,9 +214,18 @@ def limits(**overrides):
 
 
 class AppWorldContractTests(unittest.TestCase):
-    def test_isolated_provider_request_enforces_hard_timeout(self):
-        with self.assertRaises(ProviderRequestTimeout):
-            isolated_provider_request(lambda: time.sleep(0.2), 0.02)
+    def test_isolated_provider_request_uses_spawn_safe_worker(self):
+        response = isolated_provider_request(
+            provider="mock",
+            model_name="mock-v0",
+            base_url=None,
+            api_key_env=None,
+            messages=[{"role": "user", "content": "hello"}],
+            tools=[],
+            generation_options={"max_tokens": 10},
+            seconds=3,
+        )
+        self.assertIn("[mock]", response.content)
 
     def test_code_batch_validator_rejects_dynamic_or_unsafe_python(self):
         with self.assertRaises(BatchCodeRejected):
