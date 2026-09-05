@@ -1,0 +1,43 @@
+{
+  "schema_version": "appworld.task-manifest.v1",
+  "benchmark": "AppWorld",
+  "task_set": "p2_mechanism",
+  "resolved_selection_set": "p2_mechanism",
+  "appworld_commit": "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
+  "selection_algorithm": "scenario-round-robin-sha256-v1",
+  "selection_config_hash": "71fe24dc005779bda260823c8c08fbeff993fa1a75586544fe699d62a4e283aa",
+  "splits": {
+    "train": [
+      "e85d92a_2",
+      "e7a10f8_3",
+      "2a163ab_1",
+      "ccb4494_2",
+      "82e2fac_3",
+      "afc0fce_3"
+    ],
+    "dev": [
+      "0d8a4ee_3",
+      "b119b1f_1",
+      "23cf851_3",
+      "6c2c621_2",
+      "fac291d_2",
+      "3ab5b8b_3"
+    ]
+  },
+  "task_ids": [
+    "e85d92a_2",
+    "e7a10f8_3",
+    "2a163ab_1",
+    "ccb4494_2",
+    "82e2fac_3",
+    "afc0fce_3",
+    "0d8a4ee_3",
+    "b119b1f_1",
+    "23cf851_3",
+    "6c2c621_2",
+    "fac291d_2",
+    "3ab5b8b_3"
+  ],
+  "task_count": 12,
+  "selection_hash": "e174ede5a9bce47d6594a221b31e31ae3ffa1c164bc08149e2c086294053eeca"
+}

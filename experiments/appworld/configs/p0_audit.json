@@ -1,0 +1,26 @@
+{
+  "schema_version": "2",
+  "experiment_id": "appworld_p0_audit_v1",
+  "experiment": "E2", "benchmark": "AppWorld", "stage": "P0_audit",
+  "task_set": "p0_audit", "base_condition": "Full",
+  "lessons": {"enabled": false, "store_snapshot": null},
+  "model": {
+    "provider": "from_environment", "model_name_env": "METAMORPH_MODEL", "api_base_env": "METAMORPH_BASE_URL",
+    "temperature": 0.0, "max_output_tokens_per_call": 4096, "request_timeout_seconds": 120,
+    "prompt_version": "appworld_auditable_workflow_v1", "tool_schema_version": "appworld_constrained_code_batch_v1"
+  },
+  "budget": {
+    "max_steps": 100, "max_errors": 5, "max_total_tokens": 150000, "max_tool_calls": 500,
+    "max_latency_seconds": 600, "allow_write": true,
+    "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0
+  },
+  "seeds": [300],
+  "component_conditions": [{"id": "Full", "intervention": null}],
+  "edge_conditions": [
+    {"id": "Mask-P-to-E", "masked_edge": ["planner", "executor"], "artifact_policy": "typed_null", "replay_policy": "stage_checkpoint_downstream_only"},
+    {"id": "Mask-E-to-V", "masked_edge": ["executor", "verifier"], "artifact_policy": "typed_null", "replay_policy": "stage_checkpoint_downstream_only"},
+    {"id": "Replay-Control-E-to-V", "masked_edge": ["executor", "verifier"], "artifact_policy": "passthrough", "replay_policy": "stage_checkpoint_downstream_only"}
+  ],
+  "statistical_plan": {"primary_contrasts": ["Full - Replay-Control-E-to-V"], "unit": "paired task × seed", "ci": "diagnostic only; no efficacy inference", "primary_metric": "replay correctness and trace completeness"},
+  "status": "ready_for_engineering_acceptance"
+}

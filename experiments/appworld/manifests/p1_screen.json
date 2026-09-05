@@ -1,0 +1,59 @@
+{
+  "schema_version": "appworld.task-manifest.v1",
+  "benchmark": "AppWorld",
+  "task_set": "p1_screen",
+  "resolved_selection_set": "p1_screen",
+  "appworld_commit": "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
+  "selection_algorithm": "scenario-round-robin-sha256-v1",
+  "selection_config_hash": "71fe24dc005779bda260823c8c08fbeff993fa1a75586544fe699d62a4e283aa",
+  "splits": {
+    "train": [
+      "c901732_2",
+      "aa8502b_2",
+      "ccb4494_1",
+      "e7a10f8_2",
+      "2a163ab_2",
+      "27e1026_1",
+      "76f2c72_1",
+      "07b42fd_3",
+      "692c77d_2",
+      "3c13f5a_3"
+    ],
+    "dev": [
+      "57c3486_2",
+      "3ab5b8b_1",
+      "4ec8de5_1",
+      "6c2c621_3",
+      "396c5a2_1",
+      "6171bbc_2",
+      "4fab96f_1",
+      "fac291d_2",
+      "530b157_3",
+      "6bdbc26_1"
+    ]
+  },
+  "task_ids": [
+    "c901732_2",
+    "aa8502b_2",
+    "ccb4494_1",
+    "e7a10f8_2",
+    "2a163ab_2",
+    "27e1026_1",
+    "76f2c72_1",
+    "07b42fd_3",
+    "692c77d_2",
+    "3c13f5a_3",
+    "57c3486_2",
+    "3ab5b8b_1",
+    "4ec8de5_1",
+    "6c2c621_3",
+    "396c5a2_1",
+    "6171bbc_2",
+    "4fab96f_1",
+    "fac291d_2",
+    "530b157_3",
+    "6bdbc26_1"
+  ],
+  "task_count": 20,
+  "selection_hash": "fefe3c3ca28f10584ede1a9b6ebe93d48dbe25539a6828d76e72c324fa7ab451"
+}

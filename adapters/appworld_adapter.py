@@ -1,0 +1,718 @@
+"""Fixed-S3 AppWorld controller with strict contracts and auditable checkpoints.
+
+The module intentionally depends on a small world/model protocol so all causal
+semantics can be tested without exposing AppWorld ground truth to an agent.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import time
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Literal, Protocol
+
+from pydantic import BaseModel
+
+from .appworld_budget import AppWorldBudgetLedger, BudgetExhausted, BudgetLimits
+from .appworld_code_executor import (
+    CODE_EXECUTOR_NAME,
+    BatchCodeRejected,
+    code_executor_schema,
+    extract_batch_calls,
+    instrument_batch_code,
+    validate_batch_code,
+)
+from .appworld_contracts import (
+    ExecutorArtifact,
+    PlannerArtifact,
+    SCHEMA_VERSION,
+    ToolSelectionArtifact,
+    VerifierArtifact,
+    artifact_hash,
+    canonical_json,
+    typed_null,
+    validate_artifact,
+)
+
+
+READ_METHODS = {"GET"}
+LOGIN_API = "login"
+MAX_TOOL_OUTPUT_CHARS = 20_000
+
+
+class PhaseModel(Protocol):
+    model_name: str
+
+    def complete(
+        self,
+        *,
+        phase: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_output_tokens: int,
+    ) -> Any: ...
+
+
+class ProviderPhaseModel:
+    """Bridge Metamorph's normalized provider adapter into the experiment core."""
+
+    def __init__(
+        self,
+        client_bundle: Any,
+        *,
+        temperature: float = 0.0,
+        seed: int | None = None,
+        request_timeout_seconds: float | None = None,
+    ) -> None:
+        self.adapter = client_bundle.adapter
+        self.model_name = client_bundle.model_name
+        self.provider = client_bundle.provider
+        self.temperature = temperature
+        self.seed = seed
+        self.request_timeout_seconds = request_timeout_seconds
+
+    def configure(self, *, temperature: float, seed: int, request_timeout_seconds: float | None = None) -> None:
+        self.temperature = temperature
+        self.seed = seed
+        self.request_timeout_seconds = request_timeout_seconds
+
+    def complete(
+        self,
+        *,
+        phase: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_output_tokens: int,
+    ) -> Any:
+        del phase
+        return self.adapter.complete_configured(
+            model_name=self.model_name,
+            messages=messages,
+            tools=tools,
+            generation_options={
+                "temperature": self.temperature,
+                "seed": self.seed,
+                "max_tokens": max_output_tokens,
+                "timeout": self.request_timeout_seconds,
+            },
+        )
+
+
+@dataclass
+class PhaseTrace:
+    phase: str
+    status: str
+    answer: str = ""
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    code_batches: list[dict[str, Any]] = field(default_factory=list)
+    contract_errors: list[str] = field(default_factory=list)
+    artifact: dict[str, Any] | None = None
+    started_at: float = 0.0
+    latency_seconds: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _response_parts(response: Any) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+    if isinstance(response, dict):
+        return (
+            str(response.get("content", response.get("answer", "")) or ""),
+            list(response.get("tool_calls") or []),
+            dict(response.get("usage") or response.get("metrics") or {}),
+        )
+    return (
+        str(getattr(response, "content", "") or ""),
+        list(getattr(response, "tool_calls", None) or []),
+        dict(getattr(response, "usage", None) or {}),
+    )
+
+
+def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
+    # UTF-8 bytes / 3 is conservative for the English-heavy AppWorld schemas.
+    payload = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)
+    return max(1, (len(payload.encode("utf-8")) + 2) // 3)
+
+
+def _hash_directory(path: Path) -> str:
+    digest = hashlib.sha256()
+    if not path.exists():
+        return digest.hexdigest()
+    for file_path in sorted(item for item in path.rglob("*") if item.is_file()):
+        digest.update(str(file_path.relative_to(path)).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file_path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _safe_tool_code(function_name: str, arguments: dict[str, Any]) -> str:
+    if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*__[a-zA-Z_][a-zA-Z0-9_]*", function_name):
+        raise ValueError(f"invalid AppWorld function name: {function_name}")
+    return f"print({function_name}(**{arguments!r}))"
+
+
+def _contract_instructions(contract: type[BaseModel]) -> str:
+    return (
+        "Return exactly one JSON object, with no markdown or surrounding prose. "
+        "It must validate against this JSON Schema:\n"
+        + json.dumps(contract.model_json_schema(), ensure_ascii=False, sort_keys=True)
+    )
+
+
+class AppWorldController:
+    """Execute one S0 or fixed-S3 condition inside one AppWorld instance."""
+
+    def __init__(
+        self,
+        *,
+        world: Any,
+        model: PhaseModel,
+        limits: BudgetLimits,
+        trace_dir: Path,
+        json_contract: bool = True,
+        enable_verifier: bool = True,
+        enable_repair: bool = True,
+        max_output_tokens: int = 4096,
+        initial_usage: dict[str, Any] | None = None,
+        require_token_usage: bool = False,
+    ) -> None:
+        self.world = world
+        self.model = model
+        self.ledger = AppWorldBudgetLedger(limits, initial_usage=initial_usage)
+        self.trace_dir = trace_dir
+        self.trace_dir.mkdir(parents=True, exist_ok=True)
+        self.json_contract = json_contract
+        self.enable_verifier = enable_verifier
+        self.enable_repair = enable_repair
+        self.max_output_tokens = max_output_tokens
+        self.require_token_usage = require_token_usage
+        self.traces: dict[str, PhaseTrace] = {}
+        self.checkpoints: dict[str, dict[str, Any]] = {}
+        self._function_docs = list(world.task.api_docs.function_calling())
+        self._standard_docs = {
+            f"{app_name}__{api_name}": doc
+            for app_name, api_docs in world.task.api_docs.items()
+            for api_name, doc in api_docs.items()
+        }
+        self._function_by_name = {
+            item["function"]["name"]: item for item in self._function_docs
+        }
+        self.selected_tool_names: list[str] = []
+
+    def _write_trace(self, trace: PhaseTrace) -> None:
+        self.traces[trace.phase] = trace
+        path = self.trace_dir / f"{trace.phase}.json"
+        path.write_text(json.dumps(trace.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _is_write(self, tool_name: str) -> bool:
+        doc = self._standard_docs.get(tool_name, {})
+        # Login creates an authentication session but is allowed in read-only
+        # phases and is not counted as a task-state write action.
+        return str(doc.get("method", "POST")).upper() not in READ_METHODS and doc.get("api_name") != LOGIN_API
+
+    def _tools(self, names: list[str], *, read_only: bool) -> list[dict[str, Any]]:
+        output = []
+        for name in names:
+            if name not in self._function_by_name:
+                continue
+            if read_only and self._is_write(name):
+                continue
+            output.append(self._function_by_name[name])
+        # This synthetic tool retains function-calling compatibility while
+        # allowing the paper's code-style agents to loop over direct APIs in a
+        # single AppWorld interaction. Its AST validator only admits ``output``.
+        output.append(
+            code_executor_schema(
+                allowed_names=[item["function"]["name"] for item in output],
+                read_only=read_only,
+            )
+        )
+        return output
+
+    def _execute_batch_code(
+        self,
+        *,
+        code: str,
+        allowed_names: set[str],
+        phase: str,
+        trace: PhaseTrace,
+    ) -> tuple[str, list[dict[str, Any]], bool]:
+        """Execute one validated code batch and account for actual API calls.
+
+        The AppWorld requester enforces the remaining aggregate API allowance
+        during the cell itself.  Instrumentation then gives us an exact
+        per-call audit record for artifact reconciliation and cost reporting.
+        """
+
+        validation = validate_batch_code(code, allowed_api_names=allowed_names)
+        writes = [name for name in validation.api_names if self._is_write(name)]
+        if writes and not self.ledger.limits.allow_write:
+            self.ledger.safety_incidents += 1
+            raise PermissionError("write action rejected by allow_write=false")
+        remaining = self.ledger.remaining_tool_calls()
+        if validation.api_names and remaining < 1:
+            self.ledger.ensure_tool_capacity(1)
+        tracker = getattr(getattr(self.world, "requester", None), "request_tracker", None)
+        if tracker is None or not hasattr(tracker, "max_num_requests"):
+            raise RuntimeError("AppWorld code executor requires a request-tracked world")
+        old_cap = tracker.max_num_requests
+        tracker.max_num_requests = max(1, remaining)
+        try:
+            raw_output = str(self.world.execute(instrument_batch_code(validation)))
+        finally:
+            tracker.max_num_requests = old_cap
+        visible_output, calls = extract_batch_calls(raw_output)
+        records: list[dict[str, Any]] = []
+        for call in calls:
+            if call.name not in allowed_names:
+                self.ledger.safety_incidents += 1
+                raise PermissionError(f"batch called a tool not allowed in {phase}: {call.name}")
+            is_write = self._is_write(call.name)
+            self.ledger.before_tool_call(is_write=is_write)
+            record = {
+                "name": call.name,
+                "arguments": call.arguments,
+                "output": "[executed in constrained code batch]",
+                "success": call.success,
+                "batch": True,
+            }
+            if call.error:
+                record["error"] = call.error
+            records.append(record)
+            if not call.success:
+                self.ledger.record_error(tool=True)
+        if calls:
+            self.ledger.after_tool_call()
+        batch_record = {
+            "code": validation.code,
+            "api_names_static": list(validation.api_names),
+            "api_calls_observed": len(calls),
+            "write_calls_observed": sum(1 for call in calls if self._is_write(call.name)),
+            "success": not raw_output.startswith("Execution failed") and all(call.success for call in calls),
+        }
+        trace.code_batches.append(batch_record)
+        summary = visible_output or f"Code batch executed {len(calls)} API call(s)."
+        return summary, records, bool(batch_record["success"])
+
+    def _tool_catalog(self) -> dict[str, str]:
+        return {
+            name: str(doc.get("description", ""))
+            for name, doc in self._standard_docs.items()
+            if name in self._function_by_name
+        }
+
+    def select_tools(self) -> list[str]:
+        catalog = self._tool_catalog()
+        mandatory = {
+            name
+            for name in catalog
+            if name.startswith("supervisor__") or name.endswith("__login")
+        }
+        prompt = (
+            "Select the AppWorld APIs that may be needed to solve the task. Use only the task and "
+            "API names/descriptions; do not infer from hidden outcomes. Include APIs for retrieval, "
+            "mutation, verification, and task completion. Select at most 50.\n\n"
+            f"TASK:\n{self.world.task.instruction}\n\n"
+            f"API CATALOG:\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
+            + _contract_instructions(ToolSelectionArtifact)
+        )
+        trace, artifact = self._run_phase(
+            "tool_selector", prompt, [], contract=ToolSelectionArtifact, allow_contract_retry=True
+        )
+        selected = list(artifact.tools) if isinstance(artifact, ToolSelectionArtifact) else []
+        selected = [name for name in selected if name in self._function_by_name]
+        if len(mandatory) > 50:
+            raise ValueError(f"mandatory AppWorld tools exceed selector limit: {len(mandatory)}")
+        optional = sorted(set(selected) - mandatory)
+        selected = sorted(mandatory) + optional[: 50 - len(mandatory)]
+        if not selected:
+            # Deterministic, outcome-independent fallback. This is deliberately
+            # broad enough to keep the run diagnosable rather than silently fail.
+            selected = sorted(mandatory) + sorted(set(catalog) - mandatory)[: 50 - len(mandatory)]
+        self.selected_tool_names = selected
+        trace.artifact = {"selected_tools": selected, "count": len(selected)}
+        self._write_trace(trace)
+        return selected
+
+    def _run_phase(
+        self,
+        phase: str,
+        prompt: str,
+        tools: list[dict[str, Any]],
+        *,
+        contract: type[BaseModel] | None = None,
+        allow_contract_retry: bool = True,
+    ) -> tuple[PhaseTrace, BaseModel | str | None]:
+        started = time.clock_gettime(time.CLOCK_MONOTONIC)
+        trace = PhaseTrace(
+            phase=phase,
+            status="running",
+            started_at=time.clock_gettime(time.CLOCK_REALTIME),
+        )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "You are a bounded AppWorld experiment agent. Never use hidden ground truth."},
+            {"role": "user", "content": prompt},
+        ]
+        contract_retry_used = False
+        try:
+            while True:
+                self.ledger.before_model_call(_estimate_tokens(messages, tools), self.max_output_tokens)
+                response = self.model.complete(
+                    phase=phase,
+                    messages=messages,
+                    tools=tools,
+                    max_output_tokens=self.max_output_tokens,
+                )
+                content, tool_calls, usage = _response_parts(response)
+                has_token_usage = any(
+                    key in usage
+                    for key in ("prompt_tokens", "input_tokens", "completion_tokens", "output_tokens", "total_tokens")
+                )
+                if not has_token_usage:
+                    self.ledger.missing_token_usage_calls += 1
+                    if self.require_token_usage:
+                        raise RuntimeError("provider response is missing token usage in formal mode")
+                self.ledger.record_model_call(usage)
+                if tool_calls:
+                    messages.append({
+                        "role": "assistant",
+                        "content": content or None,
+                        "tool_calls": [
+                            {
+                                "id": item.get("id") or f"{phase}-{len(trace.tool_calls)}-{index}",
+                                "type": "function",
+                                "function": {"name": item.get("name", ""), "arguments": item.get("arguments", "{}")},
+                            }
+                            for index, item in enumerate(tool_calls)
+                        ],
+                    })
+                    allowed_names = {item["function"]["name"] for item in tools}
+                    for index, call in enumerate(tool_calls):
+                        name = str(call.get("name", ""))
+                        call_id = str(call.get("id") or f"{phase}-{len(trace.tool_calls)}-{index}")
+                        arguments_raw = call.get("arguments", "{}")
+                        arguments: dict[str, Any] = {}
+                        try:
+                            arguments = json.loads(arguments_raw) if isinstance(arguments_raw, str) else dict(arguments_raw)
+                            if not isinstance(arguments, dict):
+                                raise ValueError("arguments must be an object")
+                            if name == CODE_EXECUTOR_NAME:
+                                code = arguments.get("code")
+                                if not isinstance(code, str):
+                                    raise BatchCodeRejected("code executor requires a string 'code' argument")
+                                output, records, ok = self._execute_batch_code(
+                                    code=code,
+                                    allowed_names=allowed_names - {CODE_EXECUTOR_NAME},
+                                    phase=phase,
+                                    trace=trace,
+                                )
+                                trace.tool_calls.extend(records)
+                                messages.append({"role": "tool", "tool_call_id": call_id, "content": output[:MAX_TOOL_OUTPUT_CHARS]})
+                                continue
+                            if name not in allowed_names:
+                                self.ledger.safety_incidents += 1
+                                raise PermissionError(f"tool is not allowed in {phase}: {name}")
+                            is_write = self._is_write(name)
+                            self.ledger.before_tool_call(is_write=is_write)
+                            output = str(self.world.execute(_safe_tool_code(name, arguments)))
+                            self.ledger.after_tool_call()
+                            ok = not output.startswith("Execution failed")
+                            if not ok:
+                                self.ledger.record_error(tool=True)
+                        except (BudgetExhausted, PermissionError):
+                            raise
+                        except Exception as exc:  # keep tool failures visible to the model
+                            output = f"Tool execution failed: {exc}"
+                            ok = False
+                            self.ledger.record_error(tool=True)
+                        record = {"name": name, "arguments": arguments, "output": output, "success": ok}
+                        trace.tool_calls.append(record)
+                        messages.append({"role": "tool", "tool_call_id": call_id, "content": output[:MAX_TOOL_OUTPUT_CHARS]})
+                    continue
+
+                trace.answer = content
+                if contract is None:
+                    trace.status = "completed" if content.strip() else "failed_empty_output"
+                    trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
+                    self._write_trace(trace)
+                    return trace, content
+
+                artifact, errors = validate_artifact(content, contract)
+                if artifact is not None:
+                    trace.status = "completed"
+                    trace.artifact = artifact.model_dump(mode="json")
+                    trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
+                    self._write_trace(trace)
+                    return trace, artifact
+                trace.contract_errors.extend(errors)
+                self.ledger.record_error(contract=True)
+                if not allow_contract_retry or contract_retry_used:
+                    trace.status = "invalid_contract"
+                    trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
+                    self._write_trace(trace)
+                    return trace, None
+                contract_retry_used = True
+                messages.append({"role": "assistant", "content": content})
+                messages.append({
+                    "role": "user",
+                    "content": "Your previous output violated the contract: " + " | ".join(errors) + "\nReturn only a corrected JSON object.",
+                })
+                tools = []
+        except (BudgetExhausted, PermissionError) as exc:
+            trace.status = "budget_stopped" if isinstance(exc, BudgetExhausted) else "permission_stopped"
+            trace.contract_errors.append(str(exc))
+            trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
+            self._write_trace(trace)
+            return trace, None
+        except Exception as exc:
+            trace.status = "failed"
+            trace.contract_errors.append(f"{type(exc).__name__}: {exc}")
+            trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
+            self._write_trace(trace)
+            raise
+
+    def checkpoint(self, name: str) -> dict[str, Any]:
+        state_id = self.world.save_state(name)
+        checkpoint_root = Path(self.world.output_checkpoints_directory) / str(state_id or name)
+        record = {
+            "state_id": str(state_id or name),
+            "state_hash": _hash_directory(checkpoint_root),
+            "path": str(checkpoint_root),
+            "budget": self.ledger.snapshot(),
+        }
+        self.checkpoints[name] = record
+        return record
+
+    def _planner(self) -> PlannerArtifact | str | None:
+        schema = _contract_instructions(PlannerArtifact) if self.json_contract else "Return a useful plain-text plan."
+        prompt = (
+            "You are the planner in a fixed planner→executor→verifier scaffold. Use only read APIs "
+            "(login is allowed) to resolve exact entities and values. Do not perform requested mutations. "
+            "For repeated inspection, prefer the constrained code-batch tool so a loop remains one AppWorld "
+            "environment interaction. Produce an ordered executable plan and explicit verification criteria.\n\n"
+            f"TASK:\n{self.world.task.instruction}\n\n{schema}"
+        )
+        trace, artifact = self._run_phase(
+            "planner",
+            prompt,
+            self._tools(self.selected_tool_names, read_only=True),
+            contract=PlannerArtifact if self.json_contract else None,
+        )
+        if isinstance(artifact, PlannerArtifact):
+            semantic_errors: list[str] = []
+            for action in artifact.ordered_actions:
+                name = f"{action.app}__{action.api}"
+                function_doc = self._function_by_name.get(name)
+                if function_doc is None:
+                    semantic_errors.append(f"unknown planned API: {name}")
+                    continue
+                parameters = function_doc["function"].get("parameters", {})
+                properties = set(parameters.get("properties", {}))
+                required = set(parameters.get("required", []))
+                supplied = set(action.arguments)
+                if required - supplied:
+                    semantic_errors.append(f"{name} missing arguments: {sorted(required - supplied)}")
+                if supplied - properties:
+                    semantic_errors.append(f"{name} unknown arguments: {sorted(supplied - properties)}")
+            if semantic_errors:
+                trace.status = "invalid_contract"
+                trace.contract_errors.extend(semantic_errors)
+                self.ledger.record_error(contract=True)
+                self._write_trace(trace)
+                return None
+        return artifact
+
+    def _executor(self, plan: PlannerArtifact | str | dict[str, Any] | None, *, phase: str = "executor") -> ExecutorArtifact | None:
+        plan_text = canonical_json(plan) if isinstance(plan, BaseModel) else str(plan or "")
+        prompt = (
+            f"You are the {phase} in a fixed AppWorld scaffold. Execute the task using only allowed APIs. "
+            "Follow the validated upstream plan when available; do not claim an action that was not observed. "
+            "If this is a repair, apply only the minimum corrections. Complete the active task through the "
+            "supervisor API when appropriate. For repeated or bulk API work, use the constrained code-batch "
+            "tool with a loop; it records every individual API invocation. In the final JSON artifact, list "
+            "those individual API calls, not the code-batch pseudo-tool.\n\n"
+            f"TASK:\n{self.world.task.instruction}\n\nUPSTREAM ARTIFACT:\n{plan_text}\n\n"
+            + _contract_instructions(ExecutorArtifact)
+        )
+        trace, artifact = self._run_phase(
+            phase,
+            prompt,
+            self._tools(self.selected_tool_names, read_only=False),
+            contract=ExecutorArtifact,
+        )
+        if isinstance(artifact, ExecutorArtifact):
+            observed = {
+                (item["name"], canonical_json(item["arguments"]))
+                for item in trace.tool_calls
+                if item["success"]
+            }
+            claimed = {
+                (f"{item.app}__{item.api}", canonical_json(item.arguments))
+                for item in artifact.executed_actions
+                if item.success
+            }
+            missing_claims = sorted(observed - claimed)
+            unsupported_claims = sorted(claimed - observed)
+            if missing_claims or unsupported_claims:
+                trace.status = "invalid_contract"
+                if missing_claims:
+                    trace.contract_errors.append(f"successful tool calls missing from artifact: {missing_claims}")
+                if unsupported_claims:
+                    trace.contract_errors.append(f"artifact claims unobserved tool calls: {unsupported_claims}")
+                self.ledger.record_error(contract=True)
+                self._write_trace(trace)
+                return None
+        return artifact if isinstance(artifact, ExecutorArtifact) else None
+
+    def _verifier(self, executor: Any, *, phase: str = "verifier") -> VerifierArtifact | None:
+        executor_text = canonical_json(executor) if isinstance(executor, BaseModel) else str(executor or "")
+        prompt = (
+            "You are the read-only verifier in a fixed AppWorld scaffold. Inspect actual state with read APIs. "
+            "Verify the original task directly; do not mutate or complete it. If any criterion is not met, "
+            "return concrete minimal repair instructions. For repeated inspection, use the constrained code-batch "
+            "tool with only read APIs.\n\n"
+            f"TASK:\n{self.world.task.instruction}\n\nEXECUTOR ARTIFACT:\n{executor_text}\n\n"
+            + _contract_instructions(VerifierArtifact)
+        )
+        _, artifact = self._run_phase(
+            phase,
+            prompt,
+            self._tools(self.selected_tool_names, read_only=True),
+            contract=VerifierArtifact,
+        )
+        return artifact if isinstance(artifact, VerifierArtifact) else None
+
+    def run_fixed_s3(self, *, exclude_planner: bool = False) -> dict[str, Any]:
+        self.checkpoint("initial")
+        self.select_tools()
+        planner: PlannerArtifact | str | dict[str, Any] | None
+        if exclude_planner:
+            planner = typed_null("planner", "executor", "PlannerArtifact").model_dump(mode="json")
+        else:
+            planner = self._planner()
+        self.checkpoint("pre_executor")
+        executor = self._executor(planner)
+        self.checkpoint("post_executor")
+        verifier: VerifierArtifact | None = None
+        repair: ExecutorArtifact | None = None
+        final_verifier: VerifierArtifact | None = None
+        if self.enable_verifier:
+            verifier = self._verifier(executor)
+            if verifier is not None and verifier.status == "NOT_VERIFIED" and self.enable_repair:
+                repair = self._executor(verifier, phase="repair")
+                final_verifier = self._verifier(repair, phase="verifier_after_repair")
+        self.checkpoint("final")
+        final_answer = ""
+        for artifact in (repair, executor):
+            if artifact is not None and artifact.final_answer is not None:
+                final_answer = str(artifact.final_answer)
+                break
+        return {
+            "answer": final_answer,
+            "artifacts": {
+                "planner": planner.model_dump(mode="json") if isinstance(planner, BaseModel) else planner,
+                "executor": executor.model_dump(mode="json") if executor else None,
+                "verifier": verifier.model_dump(mode="json") if verifier else None,
+                "repair": repair.model_dump(mode="json") if repair else None,
+                "verifier_after_repair": final_verifier.model_dump(mode="json") if final_verifier else None,
+            },
+            "artifact_hashes": {
+                name: artifact_hash(value) for name, value in {
+                    "planner": planner.model_dump(mode="json") if isinstance(planner, BaseModel) else str(planner),
+                    "executor": executor.model_dump(mode="json") if executor else "",
+                    "verifier": verifier.model_dump(mode="json") if verifier else "",
+                }.items()
+            },
+        }
+
+    def replay_masked_edge(
+        self,
+        *,
+        edge: tuple[str, str],
+        baseline_artifacts: dict[str, Any],
+        selected_tools: list[str],
+        artifact_policy: str = "typed_null",
+    ) -> dict[str, Any]:
+        """Replay exactly the downstream stages after the caller restores a checkpoint."""
+
+        self.selected_tool_names = list(selected_tools)
+        planner_value = baseline_artifacts.get("planner")
+        executor_value = baseline_artifacts.get("executor")
+        if artifact_policy not in {"typed_null", "passthrough"}:
+            raise ValueError(f"unsupported artifact policy: {artifact_policy}")
+        if edge == ("planner", "executor"):
+            input_artifact = (
+                typed_null("planner", "executor", "PlannerArtifact").model_dump(mode="json")
+                if artifact_policy == "typed_null"
+                else planner_value
+            )
+            executor = self._executor(input_artifact, phase="replay_executor")
+            self.checkpoint("post_replay_executor")
+            verifier = self._verifier(executor, phase="replay_verifier") if self.enable_verifier else None
+            repair = None
+            if verifier is not None and verifier.status == "NOT_VERIFIED" and self.enable_repair:
+                repair = self._executor(verifier, phase="replay_repair")
+                self._verifier(repair, phase="replay_verifier_after_repair")
+            artifacts = {"planner": input_artifact, "executor": executor.model_dump(mode="json") if executor else None, "verifier": verifier.model_dump(mode="json") if verifier else None}
+        elif edge == ("executor", "verifier"):
+            input_artifact = (
+                typed_null("executor", "verifier", "ExecutorArtifact").model_dump(mode="json")
+                if artifact_policy == "typed_null"
+                else executor_value
+            )
+            verifier = self._verifier(input_artifact, phase="replay_verifier") if self.enable_verifier else None
+            repair = None
+            if verifier is not None and verifier.status == "NOT_VERIFIED" and self.enable_repair:
+                repair = self._executor(verifier, phase="replay_repair")
+                self._verifier(repair, phase="replay_verifier_after_repair")
+            artifacts = {"planner": planner_value, "executor": input_artifact, "verifier": verifier.model_dump(mode="json") if verifier else None}
+        else:
+            raise ValueError(f"unsupported pre-registered edge: {edge}")
+        self.checkpoint("final")
+        return {
+            "masked_edge": list(edge),
+            "artifact_policy": artifact_policy,
+            "typed_null_used": artifact_policy == "typed_null",
+            "artifacts": artifacts,
+            "artifact_hashes": {name: artifact_hash(value or "") for name, value in artifacts.items()},
+        }
+
+    def audit_payload(self) -> dict[str, Any]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "model": self.model.model_name,
+            "budget": self.ledger.snapshot(),
+            "selected_tools": list(self.selected_tool_names),
+            "selected_tool_schema_hash": artifact_hash([
+                *[
+                    self._function_by_name[name]
+                    for name in self.selected_tool_names
+                    if name in self._function_by_name
+                ],
+                code_executor_schema(
+                    allowed_names=[
+                        name for name in self.selected_tool_names if name in self._function_by_name
+                    ],
+                    read_only=False,
+                ),
+            ]),
+            "phases": {name: trace.to_dict() for name, trace in self.traces.items()},
+            "checkpoints": dict(self.checkpoints),
+        }
+
+
+def official_metrics(world: Any) -> dict[str, Any]:
+    tracker = world.evaluate(suppress_errors=True)
+    details = tracker.to_dict(stats_only=False)
+    num_tests = int(details.get("num_tests", 0) or 0)
+    pass_count = len(details.get("passes", []))
+    return {
+        "strict_success": bool(details.get("success", False)),
+        "official_reward": 1.0 if details.get("success", False) else 0.0,
+        "requirement_pass_fraction": round(pass_count / num_tests, 6) if num_tests else 0.0,
+        "individual_evaluation": details,
+    }

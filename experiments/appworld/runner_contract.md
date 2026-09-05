@@ -1,99 +1,42 @@
-# AppWorld Runner Contract
+# AppWorld Auditable Workflow Runner Contract
 
-这是 E1/E2 runner 的接口约定。当前文件只定义输入、输出和安全边界，不执行任务。
+## Frozen inputs
 
-## Runner 输入
+每个 run 绑定配置、不可变 task manifest、AppWorld commit、模型/提示词/contract/code-executor hash、预算、seed 和新 output root。P3 正式运行要求两个 worktree 干净、多个 seed、完整失败保留，且不得覆盖已有结果。P0–P2 不是主结果，允许在 train/dev 开发。
 
-Runner 必须接受：
+## E1 workflow 语义
 
-- 一个 E1 或 E2 JSON 配置；
-- 一个已经冻结的 `task_manifest.json`；
-- AppWorld root；
-- model/provider 环境变量；
-- 一个新的 experiment output root。
+E1 只比较预注册的固定 workflow：
 
-Runner 启动时必须把以下信息写入 `manifest.json`：
-
-- 当前 Metamorph git commit；
-- AppWorld commit；
-- 配置文件 hash；
-- task manifest hash；
-- model/provider、prompt/schema hash；
-- seed、budget、allow_write 和 tool policy；
-- evaluator 版本；
-- start time 和 runner version。
-
-## E1 执行语义
-
-对每个 `task_id × condition × seed`：
-
-1. 创建全新的 AppWorld 初始环境；
-2. 只把用户任务和允许的官方工具暴露给 agent；
-3. 执行 S0、Complex-only、Adaptive 或 Oracle；
-4. 记录 router、planner、executor、verifier 的 trace；
-5. 使用官方 evaluator 计算 reward；
-6. 保存所有成本、权限和安全字段。
-
-E1 的四个条件必须使用相同的 task ID、seed、model、预算和 evaluator。lesson 必须
-关闭。
-
-## E2 执行语义
-
-对每个 `task_id × intervention × seed`：
-
-1. 在同一初始环境下执行 Full-S3，并保存上游 artifacts、artifact hashes 和状态快照；
-2. 对一个组件或一条通信边执行单一干预；
-3. 重新创建相同初始环境，禁止从 Full-S3 的官方写状态继续；
-4. 恢复不受影响的上游 artifact；
-5. 使用 typed-null artifact 屏蔽目标通信边；
-6. 只重放受影响的 downstream subgraph；
-7. 使用同一个官方 evaluator 评分；
-8. 明确记录 replay 是否污染官方状态。
-
-如果 runner 只能做到“删除组件后完整重跑”，必须把该结果标为普通 ablation，不能
-标为 fixed-context causal edge intervention。
-
-## 最小 result.json
-
-每个任务必须至少包含：
-
-```json
-{
-  "benchmark": "AppWorld",
-  "experiment_id": "appworld_e1_system_v1",
-  "condition": "S0",
-  "task_id": "...",
-  "split": "test_normal",
-  "seed": 300,
-  "official_reward": 0.0,
-  "task_success": false,
-  "termination_reason": "...",
-  "token_usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "total_tokens": 0
-  },
-  "latency_seconds": 0.0,
-  "tool_calls": 0,
-  "write_actions": 0,
-  "safety_incidents": 0,
-  "tool_errors": 0,
-  "budget_exhausted": false,
-  "json_contract_violations": 0,
-  "routing": null,
-  "artifacts": [],
-  "replay": null,
-  "failure_category": null
-}
+```text
+E       = executor（planner typed-null，无 verifier/repair）
+P+E     = planner(read-only) → executor
+E+V+R   = executor → verifier(read-only) → [NOT_VERIFIED] repair → final verifier
+Full    = planner(read-only) → executor → verifier(read-only) → [NOT_VERIFIED] repair → final verifier
 ```
 
-`task_success` 必须来自官方 evaluator 或明确的官方 reward 映射，不能由“有非空输出”
-推断。
+每个 `task × workflow × seed` 使用全新世界。tool selection 是所有 workflow 的共同前置阶段，不是被比较的 workflow 组件。router、Expert 标签、在线 lesson、No-JSON-Contract 和 No-Budget-Gate 不属于此协议。
 
-## Runner 禁止事项
+## E2 组件与边干预
 
-- 不能把 test ground-truth solution、evaluation program 或 hidden difficulty 暴露给 agent；
-- 不能用 test 结果更新 router、Oracle 标签、prompt、lesson 或 task manifest；
-- 不能在 replay 后继续使用被 replay 污染的官方环境；
-- 不能超出配置中的 tool whitelist、`allow_write` 或预算；
-- 不能删除失败任务或只保存成功 trace。
+组件总效应从独立、相同初始世界比较 Full、No-Planner、No-Verifier、No-Repair。每次只关闭一个组件；No-Planner 以 typed-null 替代 planner artifact，No-Verifier 同时关闭 verifier 与 repair，No-Repair 保留 verifier 但禁止其触发 repair。
+
+边干预必须依赖同一 task/seed 的 Full checkpoint：
+
+1. `Planner→Executor` 从 `pre_executor` checkpoint 恢复，仅重跑 executor 及其下游；
+2. `Executor→Verifier` 从 `post_executor` checkpoint 恢复，仅重跑 verifier/repair 下游；
+3. `typed_null` 用 schema-compatible null artifact 替换目标边；
+4. `passthrough` 重放同样的下游与原 artifact，是 replay 负控制，不是信息边效应；
+5. checkpoint 被复制至全新世界，source hash 在前后必须完全一致；否则标记 `replay_contamination=true`，该 arm 不支持机制结论。
+
+这估计的是给定上游 checkpoint 的受控下游效应，不宣称自然直接效应。
+
+## 预算、超时和安全执行
+
+所有模型阶段与每个真实 API 调用共享一个 per-task ledger。请求级 timeout 是配置的必填字段，且不得超过 task latency budget；provider timeout/connection error 必须持久化为失败 result，不能留下悬挂进程。
+
+Planner/Verifier 只有 GET/login 权限；Executor/Repair 可写。`metamorph__execute_code` 仅允许当前阶段白名单 API、局部变量、`if` 和 `for`，禁止 import、文件/网络、动态调用、定义、`while` 和私有属性。一个 code batch 可包含多次 API 调用，但每次实际调用均单独计入 trace/API/write 预算。
+
+## 结果和失败处理
+
+主指标是官方 strict success（0/1）；requirement pass fraction 仅诊断。每个 arm 的 `result.json` 至少保存：状态、官方评分、预算、latency、选中工具、artifact/hash、checkpoints、replay/contamination、错误类型。失败、超时、权限拒绝、contract 错误和基础设施错误都必须保留；后者需单列，不混作 workflow 因果效应。

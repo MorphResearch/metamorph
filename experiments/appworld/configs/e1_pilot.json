@@ -1,0 +1,32 @@
+{
+  "schema_version": "2",
+  "experiment_id": "appworld_p1_workflow_screen_v1",
+  "experiment": "E1",
+  "benchmark": "AppWorld",
+  "stage": "P1_screen",
+  "task_set": "p1_screen",
+  "lessons": {"enabled": false, "store_snapshot": null},
+  "model": {
+    "provider": "from_environment", "model_name_env": "METAMORPH_MODEL", "api_base_env": "METAMORPH_BASE_URL",
+    "temperature": 0.0, "max_output_tokens_per_call": 4096, "request_timeout_seconds": 120,
+    "prompt_version": "appworld_auditable_workflow_v1", "tool_schema_version": "appworld_constrained_code_batch_v1"
+  },
+  "budget": {
+    "max_steps": 100, "max_errors": 5, "max_total_tokens": 150000, "max_tool_calls": 500,
+    "max_latency_seconds": 600, "allow_write": true,
+    "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0
+  },
+  "seeds": [300],
+  "conditions": [
+    {"id": "E", "workflow": {"planner": false, "verifier": false, "repair": false}},
+    {"id": "P+E", "workflow": {"planner": true, "verifier": false, "repair": false}},
+    {"id": "E+V+R", "workflow": {"planner": false, "verifier": true, "repair": true}},
+    {"id": "Full", "workflow": {"planner": true, "verifier": true, "repair": true}}
+  ],
+  "statistical_plan": {
+    "primary_contrasts": ["Full - E", "P+E - E", "E+V+R - E"],
+    "unit": "paired task × seed", "ci": "task-clustered paired bootstrap 95% CI",
+    "primary_metric": "official strict success", "secondary_metrics": ["total_tokens", "latency_seconds", "tool_calls"]
+  },
+  "status": "p1_ready_after_p0_acceptance"
+}

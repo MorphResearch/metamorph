@@ -1,88 +1,34 @@
 {
-  "schema_version": "1",
-  "experiment_id": "appworld_e2_causal_v1",
-  "benchmark": "AppWorld",
-  "stage": "workshop_main",
-  "task_set": "e2_main",
-  "base_condition": "Full-S3",
-  "router": {"enabled": false, "reason": "isolate scaffold causal effects from routing error"},
-  "lessons": {"enabled": false, "store_snapshot": null},
+  "schema_version": "2",
+  "experiment_id": "appworld_p3_e2_interventions_v1",
+  "experiment": "E2", "benchmark": "AppWorld", "stage": "P3_frozen",
+  "task_set": "p3_e2", "base_condition": "Full", "lessons": {"enabled": false, "store_snapshot": null},
   "model": {
-    "provider": "from_environment",
-    "model_name_env": "METAMORPH_MODEL",
-    "api_base_env": "METAMORPH_BASE_URL",
-    "temperature": 0.0,
-    "prompt_version": "freeze_before_run",
-    "tool_schema_version": "appworld_official_freeze_before_run"
+    "provider": "from_environment", "model_name_env": "METAMORPH_MODEL", "api_base_env": "METAMORPH_BASE_URL",
+    "temperature": 0.0, "max_output_tokens_per_call": 4096, "request_timeout_seconds": 120,
+    "prompt_version": "appworld_auditable_workflow_v1", "tool_schema_version": "appworld_constrained_code_batch_v1"
   },
   "budget": {
-    "max_steps": 20,
-    "max_errors": 5,
-    "max_total_tokens": 30000,
-    "max_tool_calls": 12,
-    "max_latency_seconds": 180,
-    "allow_write": true,
-    "tool_policy": "official_appworld_toolkit_only",
-    "replay_counts_toward_budget": true
+    "max_steps": 100, "max_errors": 5, "max_total_tokens": 150000, "max_tool_calls": 500,
+    "max_latency_seconds": 600, "allow_write": true,
+    "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0
   },
-  "seeds": [300],
+  "seeds": [300, 301, 302],
   "component_conditions": [
-    {"id": "Full-S3", "intervention": null},
+    {"id": "Full", "intervention": null},
     {"id": "No-Planner", "exclude_agent": "planner"},
     {"id": "No-Verifier", "exclude_agent": "verifier"},
-    {"id": "No-Replay", "disable_feature": "causal_replay"},
-    {"id": "No-JSON-Contract", "disable_feature": "json_contract"},
-    {"id": "No-Budget-Gate", "disable_feature": "budget_gate", "role": "safety_control_not_deployment_policy"}
+    {"id": "No-Repair", "disable_feature": "repair_loop"}
   ],
   "edge_conditions": [
-    {
-      "id": "Mask-planner-to-executor",
-      "masked_edge": ["planner", "executor"],
-      "artifact_policy": "typed_null_preserving_schema",
-      "replay_policy": "fixed_context_downstream_only"
-    },
-    {
-      "id": "Mask-executor-to-verifier",
-      "masked_edge": ["executor", "verifier"],
-      "artifact_policy": "typed_null_preserving_schema",
-      "replay_policy": "fixed_context_downstream_only"
-    }
+    {"id": "Mask-P-to-E", "masked_edge": ["planner", "executor"], "artifact_policy": "typed_null", "replay_policy": "stage_checkpoint_downstream_only"},
+    {"id": "Mask-E-to-V", "masked_edge": ["executor", "verifier"], "artifact_policy": "typed_null", "replay_policy": "stage_checkpoint_downstream_only"},
+    {"id": "Replay-Control-E-to-V", "masked_edge": ["executor", "verifier"], "artifact_policy": "passthrough", "replay_policy": "stage_checkpoint_downstream_only"}
   ],
-  "intervention_rules": {
-    "one_intervention_at_a_time": true,
-    "freeze_unaffected_upstream_artifacts": true,
-    "reset_environment_before_each_official_run": true,
-    "official_state_must_not_be_contaminated_by_replay": true,
-    "same_task_model_seed_budget_evaluator": true,
-    "test_ground_truth_available_to_runner": false
-  },
-  "metrics": {
-    "primary": ["official_reward", "task_completion_rate"],
-    "effect": ["component_effect", "edge_effect", "paired_bootstrap_95_percent_ci"],
-    "cost": ["input_tokens", "output_tokens", "total_tokens", "latency_seconds", "tool_calls"],
-    "governance": ["safety_incidents", "tool_errors", "budget_exhaustion", "json_contract_violations"],
-    "diagnostics": ["downstream_failure_type", "artifact_hashes", "replay_state_hash", "replay_contamination"]
-  },
-  "outputs": {
-    "root": "experiments/appworld/runs/appworld_e2_causal_v1",
-    "required_manifest": "manifest.json",
-    "required_task_manifest": "task_manifest.json",
-    "required_result_per_task": "runs/<intervention>/<task_id>/<seed>/result.json",
-    "required_artifacts": "artifacts/<intervention>/<task_id>/<seed>/"
-  },
   "statistical_plan": {
-    "estimand": "Q(Full-S3) - Q(intervention)",
-    "pairing": "same task_id, condition, seed and initial environment",
-    "confidence_interval": "task_level_paired_bootstrap_95_percent",
-    "primary_contrasts": [
-      "Full-S3 - No-Planner",
-      "Full-S3 - No-Verifier",
-      "Full-S3 - No-Replay",
-      "Full-S3 - No-JSON-Contract",
-      "Full-S3 - Mask-planner-to-executor",
-      "Full-S3 - Mask-executor-to-verifier"
-    ],
-    "failure_policy": "retain and categorize; never silently drop"
+    "primary_contrasts": ["Full - No-Planner", "Full - No-Verifier", "Full - No-Repair", "Full - Mask-P-to-E", "Full - Mask-E-to-V", "Full - Replay-Control-E-to-V"],
+    "unit": "paired task × seed", "ci": "task-clustered paired bootstrap 95% CI",
+    "primary_metric": "official strict success", "secondary_metrics": ["total_tokens", "latency_seconds", "tool_calls"]
   },
-  "status": "configuration_only_do_not_run_until_fixed_context_replay_is_verified"
+  "status": "frozen_only_after_p0_p1_p2_and_clean_formal_preflight"
 }

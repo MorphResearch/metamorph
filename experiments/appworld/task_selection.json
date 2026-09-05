@@ -3,30 +3,47 @@
   "benchmark": "AppWorld",
   "appworld_commit": "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
   "selection_is_frozen_before_model_run": true,
-  "selection_method": "sha256(task_id + ':' + selection_seed), sorted by digest",
+  "selection_method": "scenario-round-robin-sha256-v1: group by task generator, hash-sort within and across groups, then select round-robin",
   "sets": {
-    "pilot": {
-      "purpose": "运行稳定性、权限、evaluator 和预算 smoke；不作为论文主结果",
+    "p0_audit": {
+      "purpose": "P0 工程验收：trace、checkpoint、超时与 replay 负控制；不作为论文主结果",
       "splits": {
-        "train": {"count": 12, "selection_seed": 1801},
-        "dev": {"count": 12, "selection_seed": 1802}
+        "train": {"count": 6, "selection_seed": 1901},
+        "dev": {"count": 6, "selection_seed": 1902}
       }
     },
-    "e1_main": {
-      "purpose": "E1 四条件系统级比较",
+    "p1_screen": {
+      "purpose": "P1 E1 小规模筛查：四个固定 workflow 的质量—成本边界；不作为论文主结果",
       "splits": {
-        "test_normal": {"count": 50, "selection_seed": 1811},
-        "test_challenge": {"count": 50, "selection_seed": 1812}
+        "train": {"count": 10, "selection_seed": 1911},
+        "dev": {"count": 10, "selection_seed": 1912}
+      }
+    },
+    "p2_mechanism": {
+      "purpose": "P2 E2 机制验证：组件、通信边与 replay 负控制；不作为论文主结果",
+      "splits": {
+        "train": {"count": 6, "selection_seed": 1921},
+        "dev": {"count": 6, "selection_seed": 1922}
+      }
+    },
+    "p3_e1": {
+      "purpose": "P3 冻结后 E1 主结果：固定 workflow 的结构异质性与质量—成本 Pareto 前沿",
+      "splits": {
+        "test_normal": {"count": 25, "selection_seed": 1931},
+        "test_challenge": {"count": 25, "selection_seed": 1932}
       },
       "stratify_by": ["official_split", "task_generator", "scenario_id"]
     },
-    "e2_main": {
-      "purpose": "E2 固定上下文组件和通信边因果审计",
-      "reuse_task_set": "e1_main",
+    "p3_e2": {
+      "purpose": "P3 冻结后 E2 组件和通信边的受控干预",
+      "splits": {
+        "test_normal": {"count": 12, "selection_seed": 1941},
+        "test_challenge": {"count": 12, "selection_seed": 1942}
+      },
       "stratify_by": ["official_split", "task_generator", "scenario_id"]
     },
     "full_test_extension": {
-      "purpose": "资源允许时的扩展，不改变 e1_main/e2_main 的冻结任务集",
+      "purpose": "资源允许时的扩展，不改变 p3_e1/p3_e2 的冻结任务集",
       "splits": {
         "test_normal": {"count": "all"},
         "test_challenge": {"count": "all"}
@@ -35,8 +52,6 @@
   },
   "forbidden": [
     "按模型结果选择或删除 test task",
-    "使用 test ground-truth solution 生成 Adaptive 或 Oracle 标签",
-    "将 AppWorld metadata difficulty 直接当作 test Oracle",
-    "在正式 test 运行期间更新任务集、router 规则或 lesson store"
+    "在正式 test 运行期间更新任务集、workflow profile 或选择规则"
   ]
 }

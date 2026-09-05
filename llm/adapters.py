@@ -83,6 +83,19 @@ class ProviderAdapter:
     ) -> AdapterResponse:
         raise NotImplementedError
 
+    def complete_configured(
+        self,
+        *,
+        model_name: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        generation_options: dict[str, Any],
+    ) -> AdapterResponse:
+        """Optional experiment path with frozen decoding parameters."""
+
+        del generation_options
+        return self.complete(model_name=model_name, messages=messages, tools=tools)
+
 
 class OpenAICompatibleAdapter(ProviderAdapter):
     """Adapter for OpenAI and OpenAI-compatible providers."""
@@ -101,11 +114,14 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": messages,
-            "tools": tools,
-            "tool_choice": "auto",
             "max_tokens": max(1, int(os.getenv("METAMORPH_MAX_OUTPUT_TOKENS", "4096"))),
             "stream": stream,
         }
+        # Several OpenAI-compatible providers reject an explicitly empty tools
+        # array. Router and tool-selection phases are intentionally tool-free.
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
         kwargs.update(thinking_params_for(model_name))
         # Usage is emitted in the final chunk by modern OpenAI-compatible APIs.
         if stream:
@@ -127,6 +143,40 @@ class OpenAICompatibleAdapter(ProviderAdapter):
 
     def complete(self, *, model_name: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> AdapterResponse:
         response = self.client.chat.completions.create(**self._kwargs(model_name, messages, tools, False))
+        message = response.choices[0].message
+        return AdapterResponse(
+            content=message.content or "",
+            reasoning=getattr(message, "reasoning_content", "") or "",
+            tool_calls=[_tool_call_dict(tc) for tc in (getattr(message, "tool_calls", None) or [])],
+            usage=_usage(getattr(response, "usage", None)),
+        )
+
+    def complete_configured(
+        self,
+        *,
+        model_name: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        generation_options: dict[str, Any],
+    ) -> AdapterResponse:
+        kwargs = self._kwargs(model_name, messages, tools, False)
+        request_client = self.client
+        timeout = generation_options.get("timeout")
+        # The OpenAI SDK applies timeout/retry settings reliably through an
+        # options-bound client.  Passing only a method kwarg was insufficient
+        # with the installed OpenAI-compatible transport when a response body
+        # stalled.  Keep the kwarg fallback for lightweight test clients.
+        if hasattr(self.client, "with_options"):
+            options: dict[str, Any] = {"max_retries": 0}
+            if timeout is not None:
+                options["timeout"] = timeout
+            request_client = self.client.with_options(**options)
+        elif timeout is not None:
+            kwargs["timeout"] = timeout
+        for key in ("temperature", "seed", "max_tokens"):
+            if generation_options.get(key) is not None:
+                kwargs[key] = generation_options[key]
+        response = request_client.chat.completions.create(**kwargs)
         message = response.choices[0].message
         return AdapterResponse(
             content=message.content or "",
@@ -198,14 +248,58 @@ class AnthropicAdapter(ProviderAdapter):
             "model": model_name,
             "max_tokens": max(1, int(os.getenv("METAMORPH_MAX_OUTPUT_TOKENS", "4096"))),
             "messages": converted,
-            "tools": _anthropic_tools(tools),
         }
+        if tools:
+            kwargs["tools"] = _anthropic_tools(tools)
         if system:
             kwargs["system"] = system
         return self.client.messages.create(**kwargs)
 
     def complete(self, *, model_name: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> AdapterResponse:
         response = self._create(model_name, messages, tools)
+        content_parts: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        reasoning_parts: list[str] = []
+        for block in getattr(response, "content", []) or []:
+            block_type = getattr(block, "type", "")
+            if block_type == "text":
+                content_parts.append(getattr(block, "text", "") or "")
+            elif block_type in {"thinking", "redacted_thinking"}:
+                reasoning_parts.append(getattr(block, "thinking", "") or "")
+            elif block_type == "tool_use":
+                tool_calls.append({
+                    "id": getattr(block, "id", ""),
+                    "name": getattr(block, "name", ""),
+                    "arguments": json.dumps(getattr(block, "input", {}) or {}, ensure_ascii=False),
+                })
+        return AdapterResponse(
+            content="".join(content_parts),
+            reasoning="".join(reasoning_parts),
+            tool_calls=tool_calls,
+            usage=_usage(getattr(response, "usage", None)),
+        )
+
+    def complete_configured(
+        self,
+        *,
+        model_name: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        generation_options: dict[str, Any],
+    ) -> AdapterResponse:
+        system, converted = _anthropic_messages(messages)
+        kwargs: dict[str, Any] = {
+            "model": model_name,
+            "max_tokens": int(generation_options.get("max_tokens") or os.getenv("METAMORPH_MAX_OUTPUT_TOKENS", "4096")),
+            "messages": converted,
+        }
+        if tools:
+            kwargs["tools"] = _anthropic_tools(tools)
+        if generation_options.get("temperature") is not None:
+            kwargs["temperature"] = generation_options["temperature"]
+        if system:
+            kwargs["system"] = system
+        response = self.client.messages.create(**kwargs)
         content_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
         reasoning_parts: list[str] = []

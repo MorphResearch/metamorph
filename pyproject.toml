@@ -21,7 +21,7 @@ metamorph = "main:main"
 
 [tool.setuptools.packages.find]
 include = ["llm*", "graphs*", "state*", "tools*", "prompts*", "api*", "api.v1*",
-           "config*", "memory*", "multiagent*"]
+           "config*", "memory*", "multiagent*", "adapters*"]
 exclude = ["tests*", "scilink-agent*", "docs*", "workspace*"]
 
 [tool.setuptools.package-data]

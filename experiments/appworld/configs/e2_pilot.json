@@ -1,0 +1,37 @@
+{
+  "schema_version": "2",
+  "experiment_id": "appworld_p2_mechanism_v1",
+  "experiment": "E2",
+  "benchmark": "AppWorld",
+  "stage": "P2_mechanism",
+  "task_set": "p2_mechanism", "base_condition": "Full",
+  "lessons": {"enabled": false, "store_snapshot": null},
+  "model": {
+    "provider": "from_environment", "model_name_env": "METAMORPH_MODEL", "api_base_env": "METAMORPH_BASE_URL",
+    "temperature": 0.0, "max_output_tokens_per_call": 4096, "request_timeout_seconds": 120,
+    "prompt_version": "appworld_auditable_workflow_v1", "tool_schema_version": "appworld_constrained_code_batch_v1"
+  },
+  "budget": {
+    "max_steps": 100, "max_errors": 5, "max_total_tokens": 150000, "max_tool_calls": 500,
+    "max_latency_seconds": 600, "allow_write": true,
+    "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0
+  },
+  "seeds": [300, 301],
+  "component_conditions": [
+    {"id": "Full", "intervention": null},
+    {"id": "No-Planner", "exclude_agent": "planner"},
+    {"id": "No-Verifier", "exclude_agent": "verifier"},
+    {"id": "No-Repair", "disable_feature": "repair_loop"}
+  ],
+  "edge_conditions": [
+    {"id": "Mask-P-to-E", "masked_edge": ["planner", "executor"], "artifact_policy": "typed_null", "replay_policy": "stage_checkpoint_downstream_only"},
+    {"id": "Mask-E-to-V", "masked_edge": ["executor", "verifier"], "artifact_policy": "typed_null", "replay_policy": "stage_checkpoint_downstream_only"},
+    {"id": "Replay-Control-E-to-V", "masked_edge": ["executor", "verifier"], "artifact_policy": "passthrough", "replay_policy": "stage_checkpoint_downstream_only"}
+  ],
+  "statistical_plan": {
+    "primary_contrasts": ["Full - No-Planner", "Full - No-Verifier", "Full - No-Repair", "Full - Mask-P-to-E", "Full - Mask-E-to-V", "Full - Replay-Control-E-to-V"],
+    "unit": "paired task × seed", "ci": "task-clustered paired bootstrap 95% CI",
+    "primary_metric": "official strict success", "secondary_metrics": ["total_tokens", "latency_seconds", "tool_calls"]
+  },
+  "status": "p2_ready_after_p1_task_family_freeze"
+}
