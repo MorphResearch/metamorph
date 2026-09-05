@@ -311,10 +311,14 @@ class AppWorldExperimentRunner:
                 raise
             cleanup_error = exc
         if self.world_factory is default_world_factory:
-            with appworld_root(self.appworld_dir):
-                from appworld import AppWorld
+            try:
+                with appworld_root(self.appworld_dir):
+                    from appworld import AppWorld
 
-                AppWorld.close_all()
+                    AppWorld.close_all()
+            except (AttributeError, IndexError):
+                if not restored_checkpoint:
+                    raise
         if cleanup_error is not None:
             # The specific duplicate-freezer cleanup failure is intentionally
             # non-fatal; class-level cleanup above restored the process state.
