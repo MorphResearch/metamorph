@@ -298,7 +298,7 @@ class AppWorldExperimentRunner:
             limits=limits,
         )
 
-    def _close_world(self, world: Any, *, restored_checkpoint: bool = False) -> None:
+    def _close_world(self, world: Any, *, restored_checkpoint: bool = False) -> str | None:
         """Close a world without letting AppWorld's load-state freezer bug erase an arm.
 
         AppWorld.load_state() calls AppWorld.close_all(), which stops the
@@ -309,12 +309,11 @@ class AppWorldExperimentRunner:
         cleanup signatures and finally clear AppWorld's class-level globals.
         """
 
+        del restored_checkpoint  # both paths are vulnerable to duplicate freezer teardown
         cleanup_error: Exception | None = None
         try:
             world.close()
         except (AttributeError, IndexError) as exc:
-            if not restored_checkpoint:
-                raise
             cleanup_error = exc
         if self.world_factory is default_world_factory:
             try:
@@ -323,12 +322,12 @@ class AppWorldExperimentRunner:
 
                     AppWorld.close_all()
             except (AttributeError, IndexError):
-                if not restored_checkpoint:
-                    raise
+                cleanup_error = cleanup_error or RuntimeError("AppWorld class-level freezer cleanup failed")
         if cleanup_error is not None:
             # The specific duplicate-freezer cleanup failure is intentionally
             # non-fatal; class-level cleanup above restored the process state.
-            return
+            return f"{type(cleanup_error).__name__}: {cleanup_error}"
+        return None
 
     def _result_base(self, condition: str, task_id: str, seed: int) -> dict[str, Any]:
         return {
@@ -446,7 +445,9 @@ class AppWorldExperimentRunner:
                 "failure_category": type(exc).__name__,
             }
         finally:
-            self._close_world(world)
+            cleanup_warning = self._close_world(world)
+            if cleanup_warning is not None:
+                result["cleanup_warning"] = cleanup_warning
         return self._persist_result(run_dir, result)
 
     def run_edge_intervention(self, edge_condition: dict[str, Any], task_id: str, seed: int) -> dict[str, Any]:
@@ -539,7 +540,9 @@ class AppWorldExperimentRunner:
                 "failure_category": type(exc).__name__,
             }
         finally:
-            self._close_world(world, restored_checkpoint=True)
+            cleanup_warning = self._close_world(world, restored_checkpoint=True)
+            if cleanup_warning is not None:
+                result["cleanup_warning"] = cleanup_warning
         return self._persist_result(run_dir, result)
 
     def run_task(self, task_id: str, seed: int, condition_ids: set[str] | None = None) -> list[dict[str, Any]]:

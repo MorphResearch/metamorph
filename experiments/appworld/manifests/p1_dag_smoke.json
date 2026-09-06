@@ -1,0 +1,24 @@
+{
+  "schema_version": "appworld.task-manifest.v1",
+  "benchmark": "AppWorld",
+  "task_set": "p1_dag_smoke",
+  "appworld_commit": "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
+  "splits": {
+    "dev_simple": ["6bdbc26_1"],
+    "dev_medium": ["3ab5b8b_1"],
+    "dev_complex": ["4fab96f_1", "530b157_3"]
+  },
+  "task_ids": ["6bdbc26_1", "3ab5b8b_1", "4fab96f_1", "530b157_3"],
+  "task_count": 4,
+  "selection_protocol": {
+    "source": "public task instructions only",
+    "labels": {
+      "6bdbc26_1": "simple: one-app lookup",
+      "3ab5b8b_1": "medium: one-app multi-collection transformation",
+      "4fab96f_1": "complex: phone-to-payment temporal dependency",
+      "530b157_3": "complex: phone-to-payment transaction and confirmation"
+    },
+    "purpose": "P1 smoke only; not a formal result set"
+  },
+  "selection_hash": "2b8a8ced2f4ec1d5a7fec104bb733a8213db260dc416ae937de2c2e2da53d816"
+}

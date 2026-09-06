@@ -1,14 +1,14 @@
 {
   "schema_version": "dag-v1",
-  "experiment_id": "appworld_dag_p1_smoke_v1",
+  "experiment_id": "appworld_dag_p1_smoke_v3",
   "experiment": "DAG_E1",
   "benchmark": "AppWorld",
   "stage": "P1_smoke",
-  "task_set": "p1_dag_dev",
+  "task_set": "p1_dag_smoke",
   "lessons": {"enabled": false, "store_snapshot": null},
   "model": {
     "provider": "from_environment", "model_name_env": "METAMORPH_MODEL", "api_base_env": "METAMORPH_BASE_URL",
-    "temperature": 0.0, "max_output_tokens_per_call": 4096, "request_timeout_seconds": 120,
+    "temperature": 0.0, "max_output_tokens_per_call": 2048, "request_timeout_seconds": 90,
     "prompt_version": "appworld_dag_v1", "tool_schema_version": "appworld_constrained_code_batch_v1"
   },
   "budget": {
