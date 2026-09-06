@@ -172,6 +172,12 @@ class _SubsetValidator(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         if node.attr.startswith("_"):
             self.reject(node, "private or dunder attributes are not allowed")
+        # Attribute reads can traverse the AppWorld object graph (including a
+        # task's in-memory ground truth).  The batch language needs no object
+        # fields: API results are JSON-like values and only the explicit
+        # collection/string methods below are necessary.
+        if node.attr not in _ALLOWED_METHODS:
+            self.reject(node, f"attribute access {node.attr} is not allowed")
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> Any:

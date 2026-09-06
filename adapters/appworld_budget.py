@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import asdict, dataclass
+from threading import RLock, get_ident
 from typing import Any
 
 
@@ -45,6 +46,10 @@ class AppWorldBudgetLedger:
         self.missing_token_usage_calls = int(initial_usage.get("missing_token_usage_calls", 0) or 0)
         self.violations: list[str] = []
         self.termination_reason: str | None = None
+        # G2 may issue independent read-only model requests concurrently.
+        # All budget mutation remains one shared, atomic ledger.
+        self._lock = RLock()
+        self._model_reservations: dict[int, int] = {}
 
     @property
     def total_tokens(self) -> int:
@@ -73,82 +78,104 @@ class AppWorldBudgetLedger:
         raise BudgetExhausted(self.termination_reason)
 
     def before_model_call(self, estimated_input_tokens: int, max_output_tokens: int) -> None:
-        self._check("max_steps", self.steps + 1, self.limits.max_steps)
-        self._check(
-            "max_total_tokens",
-            self.total_tokens + max(0, estimated_input_tokens) + max(1, max_output_tokens),
-            self.limits.max_total_tokens,
-        )
-        self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)
-        self.steps += 1
+        with self._lock:
+            thread_id = get_ident()
+            if thread_id in self._model_reservations:
+                raise RuntimeError("model token reservation already exists for this thread")
+            reservation = max(0, estimated_input_tokens) + max(1, max_output_tokens)
+            self._check("max_steps", self.steps + 1, self.limits.max_steps)
+            self._check(
+                "max_total_tokens",
+                self.total_tokens + sum(self._model_reservations.values()) + reservation,
+                self.limits.max_total_tokens,
+            )
+            self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)
+            self.steps += 1
+            self._model_reservations[thread_id] = reservation
 
     def record_model_call(self, usage: dict[str, Any]) -> None:
-        prompt = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
-        completion = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
-        total = int(usage.get("total_tokens", 0) or 0)
-        if total and not prompt and not completion:
-            prompt = total
-        self.input_tokens += max(0, prompt)
-        self.output_tokens += max(0, completion)
-        # Provider token accounting is authoritative and can be slightly larger
-        # than the pre-call estimate. Stop immediately instead of allowing an
-        # over-budget response to be recorded as a completed phase.
-        self._check("max_total_tokens", self.total_tokens, self.limits.max_total_tokens)
-        self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)
+        with self._lock:
+            self._model_reservations.pop(get_ident(), None)
+            prompt = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
+            completion = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
+            total = int(usage.get("total_tokens", 0) or 0)
+            if total and not prompt and not completion:
+                prompt = total
+            self.input_tokens += max(0, prompt)
+            self.output_tokens += max(0, completion)
+            # Provider token accounting is authoritative and can be slightly larger
+            # than the pre-call estimate. Stop immediately instead of allowing an
+            # over-budget response to be recorded as a completed phase.
+            self._check(
+                "max_total_tokens", self.total_tokens + sum(self._model_reservations.values()), self.limits.max_total_tokens
+            )
+            self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)
+
+    def cancel_model_call(self) -> None:
+        """Release a pre-call reservation when the provider raises before usage exists."""
+
+        with self._lock:
+            self._model_reservations.pop(get_ident(), None)
 
     def before_tool_call(self, *, is_write: bool) -> None:
-        self._check("max_tool_calls", self.tool_calls + 1, self.limits.max_tool_calls)
-        self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)
-        if is_write and not self.limits.allow_write:
-            self.safety_incidents += 1
-            raise PermissionError("write action rejected by allow_write=false")
-        self.tool_calls += 1
-        if is_write:
-            self.write_actions += 1
+        with self._lock:
+            self._check("max_tool_calls", self.tool_calls + 1, self.limits.max_tool_calls)
+            self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)
+            if is_write and not self.limits.allow_write:
+                self.safety_incidents += 1
+                raise PermissionError("write action rejected by allow_write=false")
+            self.tool_calls += 1
+            if is_write:
+                self.write_actions += 1
 
     def remaining_tool_calls(self) -> int:
         """Return the still-admissible API calls, including a soft-gate buffer."""
 
-        effective = self.limits.max_tool_calls
-        if not self.limits.enforce:
-            effective = int(self.limits.max_tool_calls * self.limits.emergency_multiplier)
-        return max(0, effective - self.tool_calls)
+        with self._lock:
+            effective = self.limits.max_tool_calls
+            if not self.limits.enforce:
+                effective = int(self.limits.max_tool_calls * self.limits.emergency_multiplier)
+            return max(0, effective - self.tool_calls)
 
     def ensure_tool_capacity(self, count: int) -> None:
         """Check capacity without recording a call (used before a code batch)."""
 
-        self._check("max_tool_calls", self.tool_calls + max(0, count), self.limits.max_tool_calls)
+        with self._lock:
+            self._check("max_tool_calls", self.tool_calls + max(0, count), self.limits.max_tool_calls)
 
     def after_tool_call(self) -> None:
         """Catch latency exhaustion caused by the tool call itself."""
 
-        self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)
+        with self._lock:
+            self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)
 
     def record_error(self, *, tool: bool = False, contract: bool = False) -> None:
-        self._check("max_errors", self.errors + 1, self.limits.max_errors)
-        self.errors += 1
-        if tool:
-            self.tool_errors += 1
-        if contract:
-            self.json_contract_violations += 1
+        with self._lock:
+            self._check("max_errors", self.errors + 1, self.limits.max_errors)
+            self.errors += 1
+            if tool:
+                self.tool_errors += 1
+            if contract:
+                self.json_contract_violations += 1
 
     def snapshot(self) -> dict[str, Any]:
-        exhausted = self.termination_reason is not None
-        return {
-            "limits": asdict(self.limits),
-            "steps": self.steps,
-            "errors": self.errors,
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "total_tokens": self.total_tokens,
-            "tool_calls": self.tool_calls,
-            "write_actions": self.write_actions,
-            "safety_incidents": self.safety_incidents,
-            "tool_errors": self.tool_errors,
-            "json_contract_violations": self.json_contract_violations,
-            "missing_token_usage_calls": self.missing_token_usage_calls,
-            "latency_seconds": round(self.elapsed, 6),
-            "budget_exhausted": exhausted,
-            "termination_reason": self.termination_reason,
-            "violations": list(dict.fromkeys(self.violations)),
-        }
+        with self._lock:
+            exhausted = self.termination_reason is not None
+            return {
+                "limits": asdict(self.limits),
+                "steps": self.steps,
+                "errors": self.errors,
+                "input_tokens": self.input_tokens,
+                "output_tokens": self.output_tokens,
+                "total_tokens": self.total_tokens,
+                "tool_calls": self.tool_calls,
+                "write_actions": self.write_actions,
+                "safety_incidents": self.safety_incidents,
+                "tool_errors": self.tool_errors,
+                "json_contract_violations": self.json_contract_violations,
+                "missing_token_usage_calls": self.missing_token_usage_calls,
+                "latency_seconds": round(self.elapsed, 6),
+                "budget_exhausted": exhausted,
+                "termination_reason": self.termination_reason,
+                "violations": list(dict.fromkeys(self.violations)),
+            }

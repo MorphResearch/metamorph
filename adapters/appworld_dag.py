@@ -9,6 +9,7 @@ prove its scheduling, artifact, and checkpoint invariants without an API call.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import json
 from typing import Any, Callable, Literal
@@ -54,9 +55,8 @@ class DAGSpec:
     id: str
     nodes: tuple[DAGNode, ...]
     edges: tuple[DAGEdge, ...]
-    # A batch is an observational scheduling declaration, not a permission to
-    # execute writes concurrently.  The executor records it even when a local
-    # runtime evaluates nodes one by one.
+    # A batch is an execution scheduling declaration.  Only independent,
+    # read-only nodes may share a batch and they are run concurrently.
     schedule: tuple[tuple[str, ...], ...]
 
 
@@ -209,17 +209,28 @@ class DAGExecutor:
         self.checkpoint = checkpoint
         self.interventions = InterventionEngine()
 
-    def execute(self, spec: DAGSpec, intervention: Intervention | None = None) -> dict[str, Any]:
+    def execute(
+        self,
+        spec: DAGSpec,
+        intervention: Intervention | None = None,
+        *,
+        initial_artifacts: dict[str, Artifact] | None = None,
+    ) -> dict[str, Any]:
         spec = DAGCompiler().compile(spec)
         intervention = intervention or Intervention()
         self.interventions.validate(spec, intervention)
-        artifacts: dict[str, Artifact] = {}
+        # Replays restore both a world checkpoint and immutable upstream
+        # artifacts.  Skipped upstream nodes therefore retain their recorded
+        # outputs instead of being silently converted to null inputs.
+        artifacts: dict[str, Artifact] = dict(initial_artifacts or {})
         node_records: dict[str, dict[str, Any]] = {}
         checkpoints: dict[str, dict[str, Any]] = {}
+        attempt_checkpoints: dict[str, dict[str, Any]] = {}
         predecessors: dict[str, list[DAGEdge]] = {node.id: [] for node in spec.nodes}
         for edge in spec.edges:
             predecessors[edge.target].append(edge)
         for batch in self.interventions.schedule_for(spec, intervention):
+            runnable: list[tuple[DAGNode, dict[str, Artifact]]] = []
             for node_id in batch:
                 node = next(item for item in spec.nodes if item.id == node_id)
                 inputs: dict[str, Artifact] = {}
@@ -244,15 +255,44 @@ class DAGExecutor:
                     if not not_verified:
                         node_records[node_id] = {"status": "skipped_condition", "inputs": inputs}
                         continue
-                artifact = self.runner(node, inputs)
-                artifacts[node_id] = artifact
-                checkpoints[node_id] = self.checkpoint(f"node-{node_id}")
-                node_records[node_id] = {
+                runnable.append((node, inputs))
+
+            # Parallel batches are limited by DAGCompiler to independent,
+            # read-only nodes.  Checkpoints are still made in deterministic
+            # graph order after all futures finish: AppWorld snapshots are not
+            # safe to create concurrently, while the model inspections are.
+            if len(runnable) > 1:
+                with ThreadPoolExecutor(max_workers=len(runnable), thread_name_prefix="dag-read") as pool:
+                    futures = [(node, inputs, pool.submit(self.runner, node, inputs)) for node, inputs in runnable]
+                    outputs = [(node, inputs, future.result()) for node, inputs, future in futures]
+            else:
+                outputs = [(node, inputs, self.runner(node, inputs)) for node, inputs in runnable]
+
+            for node, inputs, artifact in outputs:
+                checkpoint = self.checkpoint(f"node-{node.id}")
+                attempt_checkpoints[node.id] = checkpoint
+                if artifact is None:
+                    # A tool action may already have changed the world before
+                    # its final contract fails.  Preserve that state evidence,
+                    # but never call the DAG node completed or provide a fake
+                    # artifact to downstream nodes.
+                    node_records[node.id] = {
+                        "status": "failed_null_artifact",
+                        "inputs": inputs,
+                        "environment_effect_checkpoint": checkpoint,
+                    }
+                    continue
+                artifacts[node.id] = artifact
+                checkpoints[node.id] = checkpoint
+                node_records[node.id] = {
                     "status": "completed",
                     "inputs": inputs,
                     "artifact_hash": _hash(artifact),
-                    "checkpoint": checkpoints[node_id],
+                    "checkpoint": checkpoint,
                 }
+        invalid_nodes = sorted(
+            node_id for node_id, record in node_records.items() if record["status"] == "failed_null_artifact"
+        )
         return {
             "schema_version": "appworld.dag-execution.v1",
             "dag_id": spec.id,
@@ -267,4 +307,7 @@ class DAGExecutor:
             "artifact_hashes": {node_id: _hash(value) for node_id, value in artifacts.items()},
             "nodes": node_records,
             "checkpoints": checkpoints,
+            "attempt_checkpoints": attempt_checkpoints,
+            "protocol_valid": not invalid_nodes,
+            "protocol_invalid_reasons": [f"null artifact from {node_id}" for node_id in invalid_nodes],
         }

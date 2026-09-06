@@ -17,6 +17,10 @@
     "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0
   },
   "seeds": [300],
+  "statistical_limitations": {
+    "single_seed": true,
+    "note": "Gate-1 engineering smoke only; no inferential claim."
+  },
   "conditions": [
     {"id": "G0", "dag_id": "G0"},
     {"id": "G1", "dag_id": "G1"},

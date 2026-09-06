@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -110,6 +111,34 @@ class DagRuntimeTests(unittest.TestCase):
         result = DAGExecutor(runner=repair_runner, checkpoint=self._checkpoint).execute(registered_dags()["G3"])
         self.assertEqual("completed", result["nodes"]["repair"]["status"])
         self.assertEqual("completed", result["nodes"]["final_check"]["status"])
+
+    def test_parallel_read_only_batch_overlaps_and_serial_control_does_not(self) -> None:
+        def slow_runner(node: DAGNode, inputs: dict) -> dict:
+            del inputs
+            if node.id in {"inspect_a", "inspect_b"}:
+                time.sleep(0.12)
+            return {"status": "VERIFIED" if node.operator == "check" else "READY", "node": node.id}
+
+        started = time.perf_counter()
+        parallel = DAGExecutor(runner=slow_runner, checkpoint=self._checkpoint).execute(registered_dags()["G2"])
+        parallel_elapsed = time.perf_counter() - started
+        started = time.perf_counter()
+        serial = DAGExecutor(runner=slow_runner, checkpoint=self._checkpoint).execute(
+            registered_dags()["G2"], Intervention(serialize_read_only=True)
+        )
+        serial_elapsed = time.perf_counter() - started
+        self.assertTrue(parallel["protocol_valid"])
+        self.assertLess(parallel_elapsed, 0.20)
+        self.assertGreater(serial_elapsed, 0.22)
+        self.assertEqual([["inspect_a"], ["inspect_b"], ["join"], ["act"], ["check"]], serial["schedule"])
+
+    def test_null_artifact_is_audited_without_being_marked_completed(self) -> None:
+        result = DAGExecutor(runner=lambda node, inputs: None, checkpoint=self._checkpoint).execute(registered_dags()["G0"])
+        record = result["nodes"]["act"]
+        self.assertEqual("failed_null_artifact", record["status"])
+        self.assertNotIn("act", result["checkpoints"])
+        self.assertIn("act", result["attempt_checkpoints"])
+        self.assertFalse(result["protocol_valid"])
 
 
 if __name__ == "__main__":

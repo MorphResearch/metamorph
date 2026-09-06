@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,11 +20,11 @@ from adapters.appworld_code_executor import (
     validate_batch_code,
 )
 from adapters.appworld_contracts import SCHEMA_VERSION, PlannerArtifact, validate_artifact
-from adapters.appworld_experiment import AppWorldExperimentRunner, validate_experiment_config, validate_task_manifest
+from adapters.appworld_experiment import AppWorldExperimentRunner, default_world_factory, validate_experiment_config, validate_task_manifest
 from adapters.appworld_manifest import stratified_task_ids
-from adapters.appworld_dag import registered_dags
+from adapters.appworld_dag import Intervention, registered_dags
 from llm.adapters import OpenAICompatibleAdapter
-from scripts.analyze_appworld_results import paired_task_values
+from scripts.analyze_appworld_results import e3_profile_rows, paired_task_values
 
 
 def _function(name: str) -> dict:
@@ -180,6 +182,25 @@ class ScriptedModel:
         raise AssertionError(phase)
 
 
+class CodeBatchClaimModel(ScriptedModel):
+    """Models a valid artifact that names the synthetic batch tool itself."""
+
+    def complete(self, *, phase, messages, tools, max_output_tokens):
+        if phase == "dag_act":
+            index = self.calls.get(phase, 0)
+            self.calls[phase] = index + 1
+            self.messages_by_phase[phase] = deepcopy(messages)
+            usage = {"prompt_tokens": 10, "completion_tokens": 5}
+            if index == 0:
+                return {"tool_calls": [{"id": "batch", "name": CODE_EXECUTOR_NAME, "arguments": json.dumps({"code": "value = fake__read()\nprint(value)"})}], "usage": usage}
+            return {"content": json.dumps({
+                "schema_version": SCHEMA_VERSION, "status": "COMPLETED",
+                "executed_actions": [{"app": "metamorph", "api": "execute_code", "arguments": {}, "observation": "batch", "success": True}],
+                "claimed_state_changes": [], "errors": [], "final_answer": None,
+            }), "usage": usage}
+        return super().complete(phase=phase, messages=messages, tools=tools, max_output_tokens=max_output_tokens)
+
+
 class CapturingCompletions:
     def __init__(self):
         self.kwargs = None
@@ -309,6 +330,22 @@ class AppWorldContractTests(unittest.TestCase):
             ledger.record_model_call({"prompt_tokens": 8, "completion_tokens": 3})
         self.assertTrue(ledger.snapshot()["budget_exhausted"])
 
+    def test_concurrent_model_calls_reserve_shared_token_budget(self):
+        ledger = AppWorldBudgetLedger(limits(max_total_tokens=10))
+        ledger.before_model_call(estimated_input_tokens=0, max_output_tokens=6)
+
+        def reserve_second_call() -> str:
+            try:
+                ledger.before_model_call(estimated_input_tokens=0, max_output_tokens=6)
+                ledger.cancel_model_call()
+                return "reserved"
+            except BudgetExhausted:
+                return "rejected"
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            self.assertEqual("rejected", pool.submit(reserve_second_call).result())
+        ledger.cancel_model_call()
+
     def test_formal_controller_rejects_missing_token_usage(self):
         with tempfile.TemporaryDirectory() as directory:
             controller = AppWorldController(
@@ -360,6 +397,16 @@ class AppWorldContractTests(unittest.TestCase):
             self.assertEqual({"inspect_a", "inspect_b", "join", "act", "check"}, set(execution["checkpoints"]))
             self.assertEqual({"initial", "node-inspect_a", "node-inspect_b", "node-join", "node-act", "node-check", "final"}, set(controller.checkpoints))
 
+    def test_executor_accepts_observed_synthetic_code_batch_claim(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = AppWorldController(
+                world=BatchFakeWorld(Path(directory) / "world"),
+                model=CodeBatchClaimModel(), limits=limits(), trace_dir=Path(directory) / "trace",
+            )
+            result = controller.run_dag(registered_dags()["G0"])
+            self.assertTrue(result["protocol_valid"])
+            self.assertEqual("completed", controller.traces["dag_act"].status)
+
     def test_dag_e1_config_accepts_only_registered_graphs(self):
         config = {
             "benchmark": "AppWorld", "experiment": "DAG_E1", "task_set": "dev",
@@ -372,6 +419,70 @@ class AppWorldContractTests(unittest.TestCase):
         config["conditions"] = [{"id": "invalid", "dag_id": "not-a-dag"}]
         with self.assertRaises(ValueError):
             validate_experiment_config(config, formal=False)
+
+    def test_formal_single_seed_requires_explicit_limitation(self):
+        config = {
+            "benchmark": "AppWorld", "experiment": "DAG_E1", "task_set": "dev",
+            "lessons": {"enabled": False}, "seeds": [1],
+            "model": {"temperature": 0.0, "prompt_version": "dag-v1", "tool_schema_version": "v1", "max_output_tokens_per_call": 1, "request_timeout_seconds": 1},
+            "budget": {"max_steps": 1, "max_errors": 1, "max_total_tokens": 1, "max_tool_calls": 1, "max_latency_seconds": 1, "allow_write": True},
+            "conditions": [{"id": "G0", "dag_id": "G0"}],
+        }
+        with self.assertRaises(ValueError):
+            validate_experiment_config(config, formal=True)
+        config["statistical_limitations"] = {"single_seed": True}
+        validate_experiment_config(config, formal=True)
+
+    def test_default_world_factory_uses_minimal_ground_truth(self):
+        observed = {}
+
+        class CapturingAppWorld:
+            def __init__(self, **kwargs):
+                observed.update(kwargs)
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(sys.modules, {"appworld": SimpleNamespace(AppWorld=CapturingAppWorld)}):
+            default_world_factory(
+                appworld_dir=Path(directory), task_id="task", experiment_name="experiment", seed=1, limits=limits()
+            )
+        self.assertTrue(observed["load_ground_truth"])
+        self.assertEqual("minimal", observed["ground_truth_mode"])
+
+    def test_constrained_model_code_cannot_access_ground_truth_object(self):
+        with self.assertRaises(BatchCodeRejected):
+            validate_batch_code("world.task.ground_truth.answer", allowed_api_names={"fake__read"})
+
+    def test_dag_checkpoint_replay_uses_upstream_artifact_and_downstream_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline_world = FakeWorld(root / "baseline")
+            baseline_controller = AppWorldController(
+                world=baseline_world, model=ScriptedModel(), limits=limits(), trace_dir=root / "baseline-trace"
+            )
+            baseline = baseline_controller.run_dag(registered_dags()["G2"])
+            source = Path(baseline_controller.checkpoints["node-inspect_a"]["path"])
+            source_bytes = (source / "state.json").read_bytes()
+            replay_world = FakeWorld(root / "replay")
+            imported = Path(replay_world.output_checkpoints_directory) / "source"
+            imported.mkdir(parents=True)
+            (imported / "state.json").write_bytes(source_bytes)
+            replay_world.load_state("source")
+            replay_controller = AppWorldController(
+                world=replay_world,
+                model=ScriptedModel(),
+                limits=limits(),
+                initial_usage=baseline_controller.checkpoints["node-inspect_a"]["budget"],
+                trace_dir=root / "replay-trace",
+            )
+            replay = replay_controller.run_dag(
+                registered_dags()["G2"],
+                intervention=Intervention(skipped_nodes=frozenset({"inspect_a", "inspect_b"})),
+                initial_artifacts={"inspect_a": baseline["dag_execution"]["artifacts"]["inspect_a"]},
+                selected_tools=baseline_controller.selected_tool_names,
+            )
+            self.assertEqual("skipped_intervention", replay["dag_execution"]["nodes"]["inspect_b"]["status"])
+            self.assertEqual("completed", replay["dag_execution"]["nodes"]["join"]["status"])
+            self.assertNotIn("dag_inspect_b", replay_controller.traces)
+            self.assertEqual(source_bytes, (source / "state.json").read_bytes())
 
     def test_masked_replay_only_runs_downstream(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -531,6 +642,30 @@ class AppWorldContractTests(unittest.TestCase):
         values, missing = paired_task_values(results, "A", "B", "official_reward")
         self.assertEqual(values, [])
         self.assertEqual(missing, ["task"])
+
+    def test_paired_cost_excludes_unknown_cost_instead_of_treating_it_as_zero(self):
+        results = [
+            {"condition": "G1", "task_id": "a", "seed": 1, "budget": {"total_tokens": 10}},
+            {"condition": "G0", "task_id": "a", "seed": 1, "budget": {}},
+        ]
+        values, missing = paired_task_values(results, "G1", "G0", "total_tokens")
+        self.assertEqual([], values)
+        self.assertEqual(["a"], missing)
+
+    def test_e3_profile_uses_frozen_family_mapping_not_test_outcomes(self):
+        results = [
+            {"condition": "G0", "task_id": "a", "seed": 1, "strict_success": False, "cost_usd": 0.1, "protocol_valid": True},
+            {"condition": "G2", "task_id": "a", "seed": 1, "strict_success": True, "cost_usd": 0.2, "protocol_valid": True},
+            {"condition": "G3", "task_id": "a", "seed": 1, "strict_success": True, "cost_usd": 0.3, "protocol_valid": True},
+        ]
+        rows, summary = e3_profile_rows(results, {
+            "task_family": {"a": "complex"},
+            "family_to_dag": {"complex": "G2"},
+            "lambda_cost_usd": [1.0],
+        })
+        self.assertEqual("G2", rows[0]["profile_condition"])
+        self.assertEqual(0.8, rows[0]["profile_utility_lambda_1"])
+        self.assertEqual(0.8, summary[0]["mean_profile_utility"])
 
 
 if __name__ == "__main__":

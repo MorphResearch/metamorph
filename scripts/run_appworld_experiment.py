@@ -53,7 +53,15 @@ def main() -> None:
         raise ValueError("at least one frozen task must be selected")
     config = load_json(args.config.resolve())
     selected_conditions = set(args.condition) or None
-    known_conditions = {item["id"] for item in config.get("conditions", []) + config.get("component_conditions", []) + config.get("edge_conditions", [])}
+    known_conditions = {
+        item["id"]
+        for item in (
+            config.get("conditions", [])
+            + config.get("component_conditions", [])
+            + config.get("edge_conditions", [])
+            + config.get("replay_conditions", [])
+        )
+    }
     if selected_conditions is not None and not selected_conditions <= known_conditions:
         raise ValueError(f"unknown conditions: {sorted(selected_conditions - known_conditions)}")
     settings = Settings.from_environment(data_dir=args.output_root.resolve() / "runtime")

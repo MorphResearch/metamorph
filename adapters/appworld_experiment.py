@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterator
 
 from .appworld_adapter import AppWorldController, PhaseModel, _hash_directory, official_metrics
 from .appworld_budget import BudgetLimits
-from .appworld_dag import registered_dags
+from .appworld_dag import Intervention, registered_dags
 
 
 WorldFactory = Callable[..., Any]
@@ -79,11 +79,29 @@ def budget_limits(config: dict[str, Any], *, enforce: bool = True) -> BudgetLimi
     )
 
 
+def budget_cost_usd(config: dict[str, Any], budget: dict[str, Any]) -> float | None:
+    """Price observed tokens only when a frozen per-token price is supplied."""
+
+    pricing = config.get("pricing")
+    if not isinstance(pricing, dict):
+        return None
+    try:
+        input_rate = float(pricing["input_usd_per_million_tokens"])
+        output_rate = float(pricing["output_usd_per_million_tokens"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return round(
+        (float(budget.get("input_tokens", 0) or 0) * input_rate + float(budget.get("output_tokens", 0) or 0) * output_rate)
+        / 1_000_000,
+        8,
+    )
+
+
 def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
     if config.get("benchmark") != "AppWorld":
         raise ValueError("benchmark must be AppWorld")
-    if config.get("experiment") not in {"E1", "E2", "DAG_E1"}:
-        raise ValueError("experiment must be E1, E2, or DAG_E1")
+    if config.get("experiment") not in {"E1", "E2", "DAG_E1", "DAG_E2"}:
+        raise ValueError("experiment must be E1, E2, DAG_E1, or DAG_E2")
     limits = budget_limits(config)
     for name in ("max_steps", "max_errors", "max_total_tokens", "max_tool_calls", "max_latency_seconds"):
         if getattr(limits, name) <= 0:
@@ -100,6 +118,11 @@ def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
         raise ValueError("formal experiments require temperature=0")
     if int(model["max_output_tokens_per_call"]) < 1:
         raise ValueError("max_output_tokens_per_call must be positive")
+    pricing = config.get("pricing")
+    if pricing is not None:
+        for name in ("input_usd_per_million_tokens", "output_usd_per_million_tokens"):
+            if name not in pricing or float(pricing[name]) < 0:
+                raise ValueError(f"pricing.{name} must be a non-negative number")
     timeout = model.get("request_timeout_seconds")
     if timeout is None or float(timeout) <= 0:
         raise ValueError("model.request_timeout_seconds must be positive")
@@ -107,8 +130,10 @@ def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
         raise ValueError("request timeout cannot exceed per-task latency budget")
     if len(set(config.get("seeds", []))) != len(config.get("seeds", [])) or not config.get("seeds"):
         raise ValueError("seeds must be a non-empty unique list")
-    if formal and len(config["seeds"]) < 2:
-        raise ValueError("formal experiments require multiple seeds")
+    if formal and len(config["seeds"]) == 1 and not bool(
+        config.get("statistical_limitations", {}).get("single_seed")
+    ):
+        raise ValueError("single-seed formal experiments require statistical_limitations.single_seed=true")
     serialized = json.dumps(config, ensure_ascii=False)
     if formal and "freeze_before_run" in serialized:
         raise ValueError("formal config still contains freeze_before_run placeholders")
@@ -124,12 +149,29 @@ def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
         for item in config.get("edge_conditions", []):
             if item.get("artifact_policy", "typed_null") not in {"typed_null", "passthrough"}:
                 raise ValueError(f"unsupported E2 artifact policy: {item.get('artifact_policy')}")
-    if config["experiment"] == "DAG_E1":
+    if config["experiment"] in {"DAG_E1", "DAG_E2"}:
         allowed_dags = set(registered_dags())
         for item in config.get("conditions", []):
             if item.get("dag_id") not in allowed_dags:
                 raise ValueError(f"DAG_E1 condition requires dag_id in {sorted(allowed_dags)}")
-    condition_items = config.get("conditions", []) + config.get("component_conditions", []) + config.get("edge_conditions", [])
+        if config["experiment"] == "DAG_E2":
+            base_condition = config.get("base_condition")
+            base_ids = {item["id"] for item in config.get("conditions", [])}
+            if not isinstance(base_condition, str) or base_condition not in base_ids:
+                raise ValueError("DAG_E2 base_condition must name a DAG condition")
+            for item in config.get("replay_conditions", []):
+                if item.get("dag_id") not in allowed_dags:
+                    raise ValueError(f"DAG_E2 replay requires dag_id in {sorted(allowed_dags)}")
+                if not isinstance(item.get("source_checkpoint"), str):
+                    raise ValueError("DAG_E2 replay requires source_checkpoint")
+                if not isinstance(item.get("initial_artifact_nodes", []), list):
+                    raise ValueError("DAG_E2 initial_artifact_nodes must be a list")
+    condition_items = (
+        config.get("conditions", [])
+        + config.get("component_conditions", [])
+        + config.get("edge_conditions", [])
+        + config.get("replay_conditions", [])
+    )
     condition_ids = [item["id"] for item in condition_items]
     if len(condition_ids) != len(set(condition_ids)):
         raise ValueError("condition IDs must be unique")
@@ -166,7 +208,9 @@ def default_world_factory(
             max_api_calls_per_interaction=max(1, int(limits.max_tool_calls * emergency_factor)),
             timeout_seconds=max(1, int(limits.max_latency_seconds)),
             load_ground_truth=True,  # evaluator-only; never placed in model messages
-            ground_truth_mode="full",
+            # Minimal mode supports official evaluation but does not load the
+            # solution or required-API metadata into the model-serving process.
+            ground_truth_mode="minimal",
             include_direct_functions=True,
             direct_function_separator="__",
             raise_on_unsafe_syntax=True,
@@ -257,6 +301,7 @@ class AppWorldExperimentRunner:
             "budget": self.config["budget"],
             "seeds": self.config["seeds"],
             "formal": self.formal,
+            "statistical_limitations": self.config.get("statistical_limitations", {}),
         }
         path = self.output_root / "manifest.json"
         if path.exists():
@@ -404,7 +449,7 @@ class AppWorldExperimentRunner:
         )
         try:
             route_record: dict[str, Any] | None = None
-            if self.config["experiment"] == "DAG_E1":
+            if self.config["experiment"] in {"DAG_E1", "DAG_E2"}:
                 config_condition = next(item for item in self.config["conditions"] if item["id"] == condition)
                 dag_id = config_condition["dag_id"]
                 route_record = {"dag_id": dag_id, "source": "fixed_pre_registered"}
@@ -427,7 +472,16 @@ class AppWorldExperimentRunner:
                 "artifacts": execution.get("artifacts", {}),
                 "artifact_hashes": execution.get("artifact_hashes", {}),
                 "dag_execution": execution.get("dag_execution"),
+                # Environment success is the official AppWorld outcome.  This
+                # independent flag says whether all required execution traces
+                # and artifacts satisfied the audit protocol.
+                "protocol_valid": bool(execution.get("protocol_valid", True)),
+                "protocol_invalid_reasons": list(execution.get("protocol_invalid_reasons", [])),
+                "phase_statuses": execution.get("phase_statuses", {
+                    name: trace.get("status") for name, trace in audit["phases"].items()
+                }),
                 "budget": audit["budget"],
+                "cost_usd": budget_cost_usd(self.config, audit["budget"]),
                 "selected_tools": audit["selected_tools"],
                 "selected_tool_schema_hash": audit["selected_tool_schema_hash"],
                 "checkpoints": audit["checkpoints"],
@@ -440,12 +494,147 @@ class AppWorldExperimentRunner:
                 "status": "failed",
                 "official_reward": 0.0,
                 "strict_success": False,
+                "protocol_valid": False,
+                "protocol_invalid_reasons": [f"run exception: {type(exc).__name__}"],
                 "budget": controller.ledger.snapshot(),
+                "cost_usd": budget_cost_usd(self.config, controller.ledger.snapshot()),
                 "error": str(exc),
                 "failure_category": type(exc).__name__,
             }
         finally:
             cleanup_warning = self._close_world(world)
+            if cleanup_warning is not None:
+                result["cleanup_warning"] = cleanup_warning
+        return self._persist_result(run_dir, result)
+
+    def run_dag_replay_intervention(self, replay_condition: dict[str, Any], task_id: str, seed: int) -> dict[str, Any]:
+        """Restore a real DAG checkpoint and execute only its legal downstream subgraph."""
+
+        if hasattr(self.model, "configure"):
+            self.model.configure(
+                temperature=float(self.config["model"]["temperature"]),
+                seed=seed,
+                request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
+            )
+        condition = replay_condition["id"]
+        run_dir = self._run_dir(condition, task_id, seed)
+        existing_result = run_dir / "result.json"
+        if existing_result.exists():
+            if self.resume:
+                return load_json(existing_result)
+            raise FileExistsError(f"refusing to overwrite existing result: {existing_result}")
+        base = self._result_base(condition, task_id, seed)
+        baseline_path = self._run_dir(self.config["base_condition"], task_id, seed) / "result.json"
+        if not baseline_path.exists():
+            raise ValueError(f"DAG baseline required before {condition}: {baseline_path}")
+        baseline = load_json(baseline_path)
+        if baseline.get("status") != "completed" or not baseline.get("protocol_valid", False):
+            raise ValueError("DAG replay requires a completed, protocol-valid baseline")
+        baseline_execution = baseline.get("dag_execution") or {}
+        source_checkpoint_name = replay_condition["source_checkpoint"]
+        source_checkpoint = baseline["checkpoints"].get(source_checkpoint_name)
+        if not isinstance(source_checkpoint, dict):
+            raise ValueError(f"baseline checkpoint is missing: {source_checkpoint_name}")
+        source_path = Path(source_checkpoint["path"])
+        source_hash_before = _hash_directory(source_path)
+        if source_hash_before != source_checkpoint["state_hash"]:
+            raise ValueError("baseline checkpoint hash changed before DAG replay")
+        source_artifacts = baseline_execution.get("artifacts", {})
+        artifact_nodes = replay_condition.get("initial_artifact_nodes", [])
+        initial_artifacts = {name: source_artifacts[name] for name in artifact_nodes if name in source_artifacts}
+        if set(artifact_nodes) != set(initial_artifacts):
+            missing = sorted(set(artifact_nodes) - set(initial_artifacts))
+            raise ValueError(f"baseline DAG artifacts missing for replay: {missing}")
+        spec = registered_dags()[replay_condition["dag_id"]]
+        intervention_config = replay_condition.get("intervention", {})
+        intervention = Intervention(
+            skipped_nodes=frozenset(intervention_config.get("skipped_nodes", [])),
+            masked_edges=frozenset(tuple(item) for item in intervention_config.get("masked_edges", [])),
+            passthrough_edges=frozenset(tuple(item) for item in intervention_config.get("passthrough_edges", [])),
+            serialize_read_only=bool(intervention_config.get("serialize_read_only", False)),
+        )
+        limits = budget_limits(self.config)
+        world = self._new_world(condition, task_id, seed, limits)
+        imported_id = f"source-{source_checkpoint_name}"
+        destination = Path(world.output_checkpoints_directory) / imported_id
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(source_path, destination)
+        world.load_state(imported_id)
+        controller = AppWorldController(
+            world=world,
+            model=self.model,
+            limits=limits,
+            initial_usage=source_checkpoint["budget"],
+            trace_dir=run_dir / "traces",
+            json_contract=True,
+            enable_verifier=True,
+            enable_repair=True,
+            max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
+            require_token_usage=self.formal,
+            request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
+        )
+        try:
+            execution = controller.run_dag(
+                spec,
+                intervention=intervention,
+                initial_artifacts=initial_artifacts,
+                selected_tools=baseline["selected_tools"],
+            )
+            world.save()
+            metrics = official_metrics(world)
+            audit = controller.audit_payload()
+            source_hash_after = _hash_directory(source_path)
+            contamination = source_hash_before != source_hash_after
+            replay = {
+                "source_checkpoint": source_checkpoint_name,
+                "source_state_hash": source_hash_before,
+                "replay_state_hash": controller.checkpoints["final"]["state_hash"],
+                "initial_artifact_nodes": artifact_nodes,
+                "replayed_nodes": sorted(name for name, item in execution["nodes"].items() if item["status"] == "completed"),
+                "baseline_checkpoint_unchanged": not contamination,
+                "replay_contamination": contamination,
+            }
+            result = {
+                **base,
+                "status": "completed",
+                **metrics,
+                "routing": {"dag_id": spec.id, "source": "checkpoint_replay"},
+                "answer": execution.get("answer", ""),
+                "artifacts": execution.get("artifacts", {}),
+                "artifact_hashes": execution.get("artifact_hashes", {}),
+                "dag_execution": execution.get("dag_execution"),
+                "protocol_valid": bool(execution.get("protocol_valid", True)) and not contamination,
+                "protocol_invalid_reasons": [
+                    *execution.get("protocol_invalid_reasons", []),
+                    *( ["baseline checkpoint contamination"] if contamination else [] ),
+                ],
+                "phase_statuses": execution.get("phase_statuses", {
+                    name: trace.get("status") for name, trace in audit["phases"].items()
+                }),
+                "budget": audit["budget"],
+                "cost_usd": budget_cost_usd(self.config, audit["budget"]),
+                "selected_tools": baseline["selected_tools"],
+                "selected_tool_schema_hash": baseline.get("selected_tool_schema_hash"),
+                "checkpoints": audit["checkpoints"],
+                "replay": replay,
+                "failure_category": "replay_contamination" if contamination else None,
+            }
+        except Exception as exc:
+            result = {
+                **base,
+                "status": "failed",
+                "official_reward": 0.0,
+                "strict_success": False,
+                "protocol_valid": False,
+                "protocol_invalid_reasons": [f"replay exception: {type(exc).__name__}"],
+                "budget": controller.ledger.snapshot(),
+                "cost_usd": budget_cost_usd(self.config, controller.ledger.snapshot()),
+                "error": str(exc),
+                "failure_category": type(exc).__name__,
+            }
+        finally:
+            cleanup_warning = self._close_world(world, restored_checkpoint=True)
             if cleanup_warning is not None:
                 result["cleanup_warning"] = cleanup_warning
         return self._persist_result(run_dir, result)
@@ -549,6 +738,16 @@ class AppWorldExperimentRunner:
         if self.config["experiment"] in {"E1", "DAG_E1"}:
             items = [item for item in self.config["conditions"] if condition_ids is None or item["id"] in condition_ids]
             return [self._safe_run(item["id"], task_id, seed, lambda item=item: self.run_condition(item["id"], task_id, seed)) for item in items]
+        if self.config["experiment"] == "DAG_E2":
+            base_items = [item for item in self.config["conditions"] if condition_ids is None or item["id"] in condition_ids]
+            replay_items = [item for item in self.config.get("replay_conditions", []) if condition_ids is None or item["id"] in condition_ids]
+            baseline_condition = self.config["base_condition"]
+            baseline_path = self._run_dir(baseline_condition, task_id, seed) / "result.json"
+            if replay_items and not baseline_path.exists() and not any(item["id"] == baseline_condition for item in base_items):
+                base_items.insert(0, next(item for item in self.config["conditions"] if item["id"] == baseline_condition))
+            results = [self._safe_run(item["id"], task_id, seed, lambda item=item: self.run_condition(item["id"], task_id, seed)) for item in base_items]
+            results.extend(self._safe_run(item["id"], task_id, seed, lambda item=item: self.run_dag_replay_intervention(item, task_id, seed)) for item in replay_items)
+            return results
         component_items = [item for item in self.config["component_conditions"] if condition_ids is None or item["id"] in condition_ids]
         edge_items = [item for item in self.config["edge_conditions"] if condition_ids is None or item["id"] in condition_ids]
         # A fixed-context edge intervention is undefined without its matching

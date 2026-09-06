@@ -569,12 +569,14 @@ class AppWorldController:
                 })
                 tools = []
         except (BudgetExhausted, PermissionError) as exc:
+            self.ledger.cancel_model_call()
             trace.status = "budget_stopped" if isinstance(exc, BudgetExhausted) else "permission_stopped"
             trace.contract_errors.append(str(exc))
             trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
             self._write_trace(trace)
             return trace, None
         except Exception as exc:
+            self.ledger.cancel_model_call()
             trace.status = "failed"
             trace.contract_errors.append(f"{type(exc).__name__}: {exc}")
             trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
@@ -637,7 +639,14 @@ class AppWorldController:
         _, artifact = self._run_phase(phase, prompt, [], contract=PlannerArtifact)
         return artifact if isinstance(artifact, PlannerArtifact) else None
 
-    def run_dag(self, spec: DAGSpec, *, intervention: Intervention | None = None) -> dict[str, Any]:
+    def run_dag(
+        self,
+        spec: DAGSpec,
+        *,
+        intervention: Intervention | None = None,
+        initial_artifacts: dict[str, Any] | None = None,
+        selected_tools: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Run a task-internal DAG while keeping the controller plane fixed.
 
         The DAG runtime writes a checkpoint after each completed node.  Its
@@ -647,7 +656,13 @@ class AppWorldController:
         """
 
         self.checkpoint("initial")
-        self.select_tools()
+        if selected_tools is None:
+            self.select_tools()
+        else:
+            # Replay reuses the baseline's frozen tool surface.  Selecting
+            # again would add a new model call and invalidate a downstream-only
+            # intervention.
+            self.selected_tool_names = list(selected_tools)
 
         def run_node(node: DAGNode, inputs: dict[str, Any]) -> Any:
             phase = f"dag_{node.id}"
@@ -663,8 +678,20 @@ class AppWorldController:
                 return self._executor(inputs.get("verification"), phase=phase)
             raise ValueError(f"unsupported DAG operator: {node.operator}")
 
-        execution = DAGExecutor(runner=run_node, checkpoint=self.checkpoint).execute(spec, intervention)
+        execution = DAGExecutor(runner=run_node, checkpoint=self.checkpoint).execute(
+            spec, intervention, initial_artifacts=initial_artifacts
+        )
         self.checkpoint("final")
+
+        phase_statuses = {name: trace.status for name, trace in self.traces.items()}
+        invalid_phases = sorted(name for name, status in phase_statuses.items() if status != "completed")
+        # A replay correctly has no new tool-selector phase; ordinary runs
+        # must have a completed selector trace as part of the fixed controller
+        # plane.
+        if selected_tools is None and "tool_selector" not in phase_statuses:
+            invalid_phases.append("tool_selector:missing")
+        protocol_valid = bool(execution["protocol_valid"]) and not invalid_phases
+        protocol_reasons = [*execution["protocol_invalid_reasons"], *[f"phase {name} not completed" for name in invalid_phases]]
 
         def json_value(value: Any) -> Any:
             if isinstance(value, BaseModel):
@@ -689,6 +716,9 @@ class AppWorldController:
                 for node_id, value in execution["artifacts"].items()
             },
             "artifact_hashes": execution["artifact_hashes"],
+            "protocol_valid": protocol_valid,
+            "protocol_invalid_reasons": protocol_reasons,
+            "phase_statuses": phase_statuses,
         }
 
     def _executor(self, plan: PlannerArtifact | str | dict[str, Any] | None, *, phase: str = "executor") -> ExecutorArtifact | None:
@@ -699,6 +729,8 @@ class AppWorldController:
             "If this is a repair, apply only the minimum corrections. Complete the active task through the "
             "supervisor API when appropriate. For repeated or bulk API work, use the constrained code-batch "
             "tool with a loop; the controller records every individual API invocation in the immutable trace. "
+            "If you mention the synthetic metamorph__execute_code tool in executed_actions, do so only when "
+            "you actually invoked it; its expanded API calls remain the authoritative action audit. "
             "Before an authenticated app API, call that app's login API in this run and use only its returned "
             "access token; never invent, reuse, or transform credentials. "
             "In the final JSON artifact, summarize only the material actions and state changes needed for the "
@@ -714,6 +746,11 @@ class AppWorldController:
         )
         if isinstance(artifact, ExecutorArtifact):
             observed_names = {item["name"] for item in trace.tool_calls if item["success"]}
+            # A constrained code batch is a real model tool call, but its trace
+            # deliberately expands into individual AppWorld APIs.  Treat the
+            # synthetic wrapper as observed only when a recorded batch exists.
+            if trace.code_batches:
+                observed_names.add(CODE_EXECUTOR_NAME)
             claimed_names = {
                 _artifact_action_name(item.app, item.api)
                 for item in artifact.executed_actions
