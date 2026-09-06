@@ -300,6 +300,7 @@ class AppWorldExperimentRunner:
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.arm_timeout_seconds = float(self.config.get("run_control", {}).get("arm_timeout_seconds", 900))
         self._active_run_dir: Path | None = None
+        self._state_lock = threading.Lock()
         expected = self.task_manifest.get("appworld_commit")
         actual = git_commit(self.appworld_dir)
         if expected and expected != actual:
@@ -457,7 +458,10 @@ class AppWorldExperimentRunner:
         run_dir.mkdir(parents=True, exist_ok=True)
         state["last_heartbeat_at"] = _utc_now()
         path = run_dir / "run_state.json"
-        temporary = path.with_suffix(".json.tmp")
+        # G2 emits events from two genuine parallel read-only branches.  A
+        # per-thread temporary avoids one atomic replace deleting another
+        # writer's staging file before it can replace the state file.
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(path)
 
@@ -470,12 +474,13 @@ class AppWorldExperimentRunner:
     def _arm_event(self, event: str, details: dict[str, Any]) -> None:
         if self._active_run_dir is None:
             return
-        path = self._active_run_dir / "run_state.json"
-        state = load_json(path) if path.exists() else {"status": "running"}
-        if event == "STAGE_START":
-            state["current_stage"] = details.get("phase", "unknown")
-        self._write_run_state(self._active_run_dir, state)
-        self._append_arm_log(self._active_run_dir, event, details)
+        with self._state_lock:
+            path = self._active_run_dir / "run_state.json"
+            state = load_json(path) if path.exists() else {"status": "running"}
+            if event == "STAGE_START":
+                state["current_stage"] = details.get("phase", "unknown")
+            self._write_run_state(self._active_run_dir, state)
+            self._append_arm_log(self._active_run_dir, event, details)
 
     def _begin_arm(self, condition: str, task_id: str, seed: int) -> dict[str, Any] | None:
         run_dir = self._run_dir(condition, task_id, seed)

@@ -647,6 +647,17 @@ class AppWorldContractTests(unittest.TestCase):
             timeout_state = json.loads((root / "results" / "runs" / "Timeout" / "task-1" / "1" / "run_state.json").read_text())
             self.assertEqual("timeout", timeout_state["status"])
 
+            self.assertIsNone(runner._begin_arm("ParallelProbe", "task-1", 1))
+            runner._active_run_dir = runner._run_dir("ParallelProbe", "task-1", 1)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(
+                    lambda phase: runner._arm_event("STAGE_START", {"phase": phase}),
+                    ["dag_inspect_a", "dag_inspect_b"],
+                ))
+            parallel_state = json.loads((runner._active_run_dir / "run_state.json").read_text())
+            self.assertEqual("running", parallel_state["status"])
+            runner._active_run_dir = None
+
     def test_paired_analysis_requires_matching_seeds(self):
         results = [
             {"condition": "A", "task_id": "task", "seed": 1, "official_reward": 1},
