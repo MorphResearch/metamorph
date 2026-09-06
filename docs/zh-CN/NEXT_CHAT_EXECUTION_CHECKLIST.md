@@ -8,6 +8,7 @@
 - 新主协议：`docs/zh-CN/PUBLISHABLE_MINIMUM_EXPERIMENT_PLAN.md`。
 - v5 G0 已结束，且不能通过新的 Gate-1：虽然 AppWorld `strict_success=true`，但 `dag_act` 的 trace 是 `invalid_contract`、artifact 为 null。该目录只保留作诊断，不能启动其余 arm，也不能进入统计。
 - 当前代码已加入 protocol-valid gate、minimal ground truth、真实 G2 read-only 并行、DAG checkpoint replay 入口、冻结单 seed 的 formal 例外和缺失成本保护。下一次 smoke 必须使用**新的**输出根，并在修改后的代码提交后再运行。
+- `c1629b4` 后的 formal G0 已在两个独立输出根尝试：`dag_p1_smoke_v6_20260906` 与 `dag_p1_smoke_v6_retry1_20260906`。两者均在 `tool_selector` 的首次 provider 请求以 `APIConnectionError` 失败（0 token、0 tool action）；保留为基础设施失败，不得视为零成本成功或重试后选择性报告。恢复 provider 连通性后，以新的输出根重新从 G0 开始；不要运行 G1–G3。
 
 ## 第一步：确认旧 G0 诊断，不要把它当通过
 
