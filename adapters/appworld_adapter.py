@@ -42,6 +42,10 @@ from .appworld_contracts import (
 READ_METHODS = {"GET"}
 LOGIN_API = "login"
 MAX_TOOL_OUTPUT_CHARS = 20_000
+# Tool schemas are repeated on every function-calling turn.  A smaller fixed
+# shortlist keeps the executor's context from crowding out its handoff
+# artifact while still leaving enough room for cross-app tasks.
+MAX_SELECTED_TOOLS = 20
 
 
 class ProviderRequestTimeout(TimeoutError):
@@ -404,7 +408,7 @@ class AppWorldController:
         prompt = (
             "Select the AppWorld APIs that may be needed to solve the task. Use only the task and "
             "API names/descriptions; do not infer from hidden outcomes. Include APIs for retrieval, "
-            "mutation, verification, and task completion. Select at most 50.\n\n"
+            f"mutation, verification, and task completion. Select at most {MAX_SELECTED_TOOLS}.\n\n"
             f"TASK:\n{self.world.task.instruction}\n\n"
             f"API CATALOG:\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
             + _contract_instructions(ToolSelectionArtifact)
@@ -414,14 +418,14 @@ class AppWorldController:
         )
         selected = list(artifact.tools) if isinstance(artifact, ToolSelectionArtifact) else []
         selected = [name for name in selected if name in self._function_by_name]
-        if len(mandatory) > 50:
+        if len(mandatory) > MAX_SELECTED_TOOLS:
             raise ValueError(f"mandatory AppWorld tools exceed selector limit: {len(mandatory)}")
         optional = sorted(set(selected) - mandatory)
-        selected = sorted(mandatory) + optional[: 50 - len(mandatory)]
+        selected = sorted(mandatory) + optional[: MAX_SELECTED_TOOLS - len(mandatory)]
         if not selected:
             # Deterministic, outcome-independent fallback. This is deliberately
             # broad enough to keep the run diagnosable rather than silently fail.
-            selected = sorted(mandatory) + sorted(set(catalog) - mandatory)[: 50 - len(mandatory)]
+            selected = sorted(mandatory) + sorted(set(catalog) - mandatory)[: MAX_SELECTED_TOOLS - len(mandatory)]
         self.selected_tool_names = selected
         trace.artifact = {"selected_tools": selected, "count": len(selected)}
         self._write_trace(trace)
@@ -579,16 +583,16 @@ class AppWorldController:
     def _planner(self) -> PlannerArtifact | str | None:
         schema = _contract_instructions(PlannerArtifact) if self.json_contract else "Return a useful plain-text plan."
         prompt = (
-            "You are the planner in a fixed planner→executor→verifier scaffold. Use only read APIs "
-            "(login is allowed) to resolve exact entities and values. Do not perform requested mutations. "
-            "For repeated inspection, prefer the constrained code-batch tool so a loop remains one AppWorld "
-            "environment interaction. Produce an ordered executable plan and explicit verification criteria.\n\n"
+            "You are the strategy planner in a fixed planner→executor→verifier scaffold. Do not call tools: "
+            "the executor resolves task-specific entities and values from the environment. Do not perform "
+            "requested mutations. Produce a compact, executable strategy and explicit verification criteria. "
+            "This artifact is a handoff, not an interaction log.\n\n"
             f"TASK:\n{self.world.task.instruction}\n\n{schema}"
         )
         trace, artifact = self._run_phase(
             "planner",
             prompt,
-            self._tools(self.selected_tool_names, read_only=True),
+            [],
             contract=PlannerArtifact if self.json_contract else None,
         )
         if isinstance(artifact, PlannerArtifact):
@@ -622,8 +626,9 @@ class AppWorldController:
             "Follow the validated upstream plan when available; do not claim an action that was not observed. "
             "If this is a repair, apply only the minimum corrections. Complete the active task through the "
             "supervisor API when appropriate. For repeated or bulk API work, use the constrained code-batch "
-            "tool with a loop; it records every individual API invocation. In the final JSON artifact, list "
-            "those individual API calls, not the code-batch pseudo-tool.\n\n"
+            "tool with a loop; the controller records every individual API invocation in the immutable trace. "
+            "In the final JSON artifact, summarize only the material actions and state changes needed for the "
+            "downstream verifier; do not try to duplicate the complete audit log.\n\n"
             f"TASK:\n{self.world.task.instruction}\n\nUPSTREAM ARTIFACT:\n{plan_text}\n\n"
             + _contract_instructions(ExecutorArtifact)
         )
@@ -644,14 +649,10 @@ class AppWorldController:
                 for item in artifact.executed_actions
                 if item.success
             }
-            missing_claims = sorted(observed - claimed)
             unsupported_claims = sorted(claimed - observed)
-            if missing_claims or unsupported_claims:
+            if unsupported_claims:
                 trace.status = "invalid_contract"
-                if missing_claims:
-                    trace.contract_errors.append(f"successful tool calls missing from artifact: {missing_claims}")
-                if unsupported_claims:
-                    trace.contract_errors.append(f"artifact claims unobserved tool calls: {unsupported_claims}")
+                trace.contract_errors.append(f"artifact claims unobserved tool calls: {unsupported_claims}")
                 self.ledger.record_error(contract=True)
                 self._write_trace(trace)
                 return None
