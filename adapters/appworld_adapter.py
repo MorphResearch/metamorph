@@ -37,6 +37,7 @@ from .appworld_contracts import (
     typed_null,
     validate_artifact,
 )
+from .appworld_dag import DAGExecutor, DAGNode, DAGSpec, Intervention
 
 
 READ_METHODS = {"GET"}
@@ -592,7 +593,7 @@ class AppWorldController:
         self.checkpoints[name] = record
         return record
 
-    def _planner(self) -> PlannerArtifact | str | None:
+    def _planner(self, *, phase: str = "planner") -> PlannerArtifact | str | None:
         schema = _contract_instructions(PlannerArtifact) if self.json_contract else "Return a useful plain-text plan."
         prompt = (
             "You are the strategy planner in a fixed planner→executor→verifier scaffold. Do not call tools: "
@@ -603,7 +604,7 @@ class AppWorldController:
             f"TASK:\n{self.world.task.instruction}\n\n{schema}"
         )
         trace, artifact = self._run_phase(
-            "planner",
+            phase,
             prompt,
             [],
             contract=PlannerArtifact if self.json_contract else None,
@@ -617,6 +618,78 @@ class AppWorldController:
             # Exact API/argument allowlisting remains enforced at execution.
             pass
         return artifact
+
+    def _dag_join(self, inputs: dict[str, Any], *, phase: str) -> PlannerArtifact | None:
+        """Merge independent read-only inspections into one typed handoff."""
+
+        serialized_inputs = {
+            name: value.model_dump(mode="json") if isinstance(value, BaseModel) else value
+            for name, value in inputs.items()
+        }
+
+        prompt = (
+            "You are a read-only DAG join node. Merge the two upstream inspection artifacts into one concise "
+            "execution plan. Do not call tools, invent API results, or mutate state.\n\n"
+            f"TASK:\n{self.world.task.instruction}\n\n"
+            f"UPSTREAM INSPECTIONS:\n{canonical_json(serialized_inputs)}\n\n"
+            + _contract_instructions(PlannerArtifact)
+        )
+        _, artifact = self._run_phase(phase, prompt, [], contract=PlannerArtifact)
+        return artifact if isinstance(artifact, PlannerArtifact) else None
+
+    def run_dag(self, spec: DAGSpec, *, intervention: Intervention | None = None) -> dict[str, Any]:
+        """Run a task-internal DAG while keeping the controller plane fixed.
+
+        The DAG runtime writes a checkpoint after each completed node.  Its
+        callback is the only bridge to model/tool execution, which lets the
+        same compiler and intervention semantics be exercised in no-model P0
+        tests and in AppWorld runs.
+        """
+
+        self.checkpoint("initial")
+        self.select_tools()
+
+        def run_node(node: DAGNode, inputs: dict[str, Any]) -> Any:
+            phase = f"dag_{node.id}"
+            if node.operator == "inspect":
+                return self._planner(phase=phase)
+            if node.operator == "join":
+                return self._dag_join(inputs, phase=phase)
+            if node.operator == "act":
+                return self._executor(inputs.get("plan"), phase=phase)
+            if node.operator == "check":
+                return self._verifier(inputs.get("execution"), phase=phase)
+            if node.operator == "repair":
+                return self._executor(inputs.get("verification"), phase=phase)
+            raise ValueError(f"unsupported DAG operator: {node.operator}")
+
+        execution = DAGExecutor(runner=run_node, checkpoint=self.checkpoint).execute(spec, intervention)
+        self.checkpoint("final")
+
+        def json_value(value: Any) -> Any:
+            if isinstance(value, BaseModel):
+                return value.model_dump(mode="json")
+            if isinstance(value, dict):
+                return {name: json_value(item) for name, item in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [json_value(item) for item in value]
+            return value
+
+        final_answer = ""
+        for node_id in ("repair", "act"):
+            value = execution["artifacts"].get(node_id)
+            if isinstance(value, ExecutorArtifact) and value.final_answer is not None:
+                final_answer = str(value.final_answer)
+                break
+        return {
+            "answer": final_answer,
+            "dag_execution": json_value(execution),
+            "artifacts": {
+                node_id: value.model_dump(mode="json") if isinstance(value, BaseModel) else value
+                for node_id, value in execution["artifacts"].items()
+            },
+            "artifact_hashes": execution["artifact_hashes"],
+        }
 
     def _executor(self, plan: PlannerArtifact | str | dict[str, Any] | None, *, phase: str = "executor") -> ExecutorArtifact | None:
         plan_text = canonical_json(plan) if isinstance(plan, BaseModel) else str(plan or "")

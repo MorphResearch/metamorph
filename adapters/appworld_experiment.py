@@ -15,6 +15,7 @@ from typing import Any, Callable, Iterator
 
 from .appworld_adapter import AppWorldController, PhaseModel, _hash_directory, official_metrics
 from .appworld_budget import BudgetLimits
+from .appworld_dag import registered_dags
 
 
 WorldFactory = Callable[..., Any]
@@ -81,8 +82,8 @@ def budget_limits(config: dict[str, Any], *, enforce: bool = True) -> BudgetLimi
 def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
     if config.get("benchmark") != "AppWorld":
         raise ValueError("benchmark must be AppWorld")
-    if config.get("experiment") not in {"E1", "E2"}:
-        raise ValueError("experiment must be E1 or E2")
+    if config.get("experiment") not in {"E1", "E2", "DAG_E1"}:
+        raise ValueError("experiment must be E1, E2, or DAG_E1")
     limits = budget_limits(config)
     for name in ("max_steps", "max_errors", "max_total_tokens", "max_tool_calls", "max_latency_seconds"):
         if getattr(limits, name) <= 0:
@@ -123,6 +124,11 @@ def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
         for item in config.get("edge_conditions", []):
             if item.get("artifact_policy", "typed_null") not in {"typed_null", "passthrough"}:
                 raise ValueError(f"unsupported E2 artifact policy: {item.get('artifact_policy')}")
+    if config["experiment"] == "DAG_E1":
+        allowed_dags = set(registered_dags())
+        for item in config.get("conditions", []):
+            if item.get("dag_id") not in allowed_dags:
+                raise ValueError(f"DAG_E1 condition requires dag_id in {sorted(allowed_dags)}")
     condition_items = config.get("conditions", []) + config.get("component_conditions", []) + config.get("edge_conditions", [])
     condition_ids = [item["id"] for item in condition_items]
     if len(condition_ids) != len(set(condition_ids)):
@@ -399,7 +405,12 @@ class AppWorldExperimentRunner:
         )
         try:
             route_record: dict[str, Any] | None = None
-            if self.config["experiment"] == "E1":
+            if self.config["experiment"] == "DAG_E1":
+                config_condition = next(item for item in self.config["conditions"] if item["id"] == condition)
+                dag_id = config_condition["dag_id"]
+                route_record = {"dag_id": dag_id, "source": "fixed_pre_registered"}
+                execution = controller.run_dag(registered_dags()[dag_id])
+            elif self.config["experiment"] == "E1":
                 config_condition = next(item for item in self.config["conditions"] if item["id"] == condition)
                 route_record = {"workflow": workflow, "source": "fixed_pre_registered"}
                 execution = controller.run_fixed_s3(exclude_planner=not bool(workflow.get("planner")))
@@ -416,6 +427,7 @@ class AppWorldExperimentRunner:
                 "answer": execution.get("answer", ""),
                 "artifacts": execution.get("artifacts", {}),
                 "artifact_hashes": execution.get("artifact_hashes", {}),
+                "dag_execution": execution.get("dag_execution"),
                 "budget": audit["budget"],
                 "selected_tools": audit["selected_tools"],
                 "selected_tool_schema_hash": audit["selected_tool_schema_hash"],
@@ -531,7 +543,7 @@ class AppWorldExperimentRunner:
         return self._persist_result(run_dir, result)
 
     def run_task(self, task_id: str, seed: int, condition_ids: set[str] | None = None) -> list[dict[str, Any]]:
-        if self.config["experiment"] == "E1":
+        if self.config["experiment"] in {"E1", "DAG_E1"}:
             items = [item for item in self.config["conditions"] if condition_ids is None or item["id"] in condition_ids]
             return [self._safe_run(item["id"], task_id, seed, lambda item=item: self.run_condition(item["id"], task_id, seed)) for item in items]
         component_items = [item for item in self.config["component_conditions"] if condition_ids is None or item["id"] in condition_ids]

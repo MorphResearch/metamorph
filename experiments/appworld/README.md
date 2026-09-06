@@ -1,45 +1,32 @@
-# AppWorld：可审计 Workflow Profile 实验
+# AppWorld：可审计 DAG workflow 实验
 
-本目录实现论文的 P0–P3 实验协议。主问题不是“复杂 multi-agent 是否总是更强”，而是：在固定初始世界与预算下，哪些 workflow 组件和信息边带来净收益，以及这些证据能否在重复任务中复用。
+研究对象是 task-internal DAG，而不是固定控制平面的角色存在与否。控制平面固定为 `planner / DAG compiler → DAG executor → final evaluator`；实验比较的四个预注册图是 G0–G3。
 
-完整研究计划见 [CAUSAL_WORKFLOW_RESEARCH_PLAN.md](../../docs/zh-CN/CAUSAL_WORKFLOW_RESEARCH_PLAN.md)。
-
-## 固定 workflow
+完整协议见 [研究计划](../../docs/zh-CN/CAUSAL_WORKFLOW_RESEARCH_PLAN.md)，一周交付门槛见 [投稿前清单](../../docs/zh-CN/ONE_WEEK_PUBLICATION_CHECKLIST.md)。
 
 ```text
-E       = Executor
-P+E     = Planner → Executor
-E+V+R   = Executor → Verifier → [NOT_VERIFIED 时才 Repair]
-Full    = Planner → Executor → Verifier → [NOT_VERIFIED 时才 Repair]
+G0: act
+G1: inspect → act → check
+G2: inspect_a ∥ inspect_b → join → act → check
+G3: inspect → act → check → [NOT_VERIFIED: repair → final_check]
 ```
 
-Planner/Verifier 只读；Executor/Repair 可写。所有真实 API 调用、包括受限 code batch 内的调用，均写入 trace 并计入同一预算。官方主指标为 AppWorld individual evaluator 的 strict success。
+## 当前唯一可执行顺序
 
-## 配置与清单
-
-| 阶段 | 配置 | 清单 |
-|---|---|---|
-| P0 工程验收 | `configs/p0_audit.json` | `manifests/p0_audit.json` |
-| P1 小规模 E1 | `configs/e1_pilot.json` | `manifests/p1_screen.json` |
-| P2 机制验证 | `configs/e2_pilot.json` | `manifests/p2_mechanism.json` |
-| P3 E1 主实验 | `configs/e1_system.json` | `manifests/p3_e1.json` |
-| P3 E2 主实验 | `configs/e2_causal.json` | `manifests/p3_e2.json` |
-
-P0 的 `Replay-Control-E-to-V` 以原 executor artifact 重放 verifier；它是 replay 负控制，不是性能条件。`Mask-P-to-E` 和 `Mask-E-to-V` 使用 schema-compatible typed-null artifact。
-
-## 当前执行顺序
-
-先执行所有无需 API 的检查：
+1. P0：运行无模型测试；四图可编译、每个节点后 checkpoint、node/edge/topology intervention 不污染基线、passthrough 负控制通过。
+2. P1 smoke：用 `configs/dag_p1_smoke.json` 在冻结 dev 清单的少量任务上跑 G0–G3，确认真实 trace 和成本。
+3. P1/P2/P3：只有 smoke 可行后才冻结 12-task dev、6-task mechanism、18-task held-out test 清单。
 
 ```bash
 benchmarks/appworld/.venv/bin/python -m unittest discover -s tests -v
 
+# 只检查配置/manifest；不发送模型请求。
 benchmarks/appworld/.venv/bin/python scripts/run_appworld_experiment.py \
-  --config experiments/appworld/configs/p0_audit.json \
-  --task-manifest experiments/appworld/manifests/p0_audit.json \
-  --output-root /tmp/metamorph-p0-preflight --preflight-only
+  --config experiments/appworld/configs/dag_p1_smoke.json \
+  --task-manifest <frozen-dev-manifest.json> \
+  --output-root /tmp/metamorph-dag-p1-preflight --preflight-only
 ```
 
-通过后才开始 P0 的真实模型运行。请求级超时固定为 120 秒；超时会持久化为失败 arm，而不是无限挂起。P0 完成后检查 checkpoint hash、`replay_contamination=false`、trace 完整性和失败分类，再依次解锁 P1、P2 与 P3。历史的 S0/Adaptive/Expert 与 No-JSON-Contract/No-Budget-Gate 结果仅作探索记录，不能与本协议下的新矩阵合并统计。
+旧 `e1_*`、`e2_*` 与 `p0_audit.json` 记录的是固定 S3 角色消融；仅保留作工程历史，不能与 DAG 主实验合并或继续运行。
 
-正式 P3 仍要求干净的 Metamorph/AppWorld worktree、冻结 manifest、多个 seed 与完整失败保留。不要覆盖既有 output root；中断恢复使用 `--resume`。
+每个真实运行必须保存 task/config/commit hash、节点 trace/artifact hash、checkpoint hash、真实 wall-clock、token/API/工具预算与失败原因。严禁覆盖已有 output root；中断使用 `--resume`。

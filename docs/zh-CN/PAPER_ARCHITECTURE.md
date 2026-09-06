@@ -1,58 +1,62 @@
-# 论文架构：可审计的 Agent Workflow 因果归因
+# 论文大纲：Auditing and Reusing Workflow-DAG Structure for Tool Agents
 
-## 一句话主张
+## 题目候选
 
-复杂 agent workflow 并非普遍更优。通过对有状态 workflow 的可复放受控干预，可以识别在何种任务结构下应保留哪些组件和信息边，并将这些证据复用为跨会话的低成本 workflow profile。
+**Checkpointed Causal Auditing for Cost-Sensitive Workflow-DAG Selection**
 
-## Research gap
+中文工作题目：**面向工具 Agent 的可复放 DAG 结构因果审计与成本敏感复用**。
 
-现有 agent 系统通常只报告完整 workflow 的端到端成功率，或通过从头重跑的 ablation 比较架构。对于会改变环境状态、且下游会读取上游 artifact 的任务，这无法分辨：组件本身的贡献、通信信息的价值、模型重采样和轨迹变化造成的差异，也无法把一次昂贵的架构试错转化为后续同类任务可用的策略知识。
+## 摘要应讲的故事
 
-## 方法
+现有 agent workflow 常把“多角色/多智能体是否更好”当成整体比较，混淆了起始状态、执行轨迹、通信与结构本身。我们固定控制平面，让 planner 为任务选择一个小型、类型化 workflow DAG；在 stateful 环境中记录节点 artifact、checkpoint 和 hash。借助不污染基线的 checkpoint replay，我们估计节点、信息边和只读分支拓扑的局部受控下游效应。开发集的证据被冻结为成本敏感 profile，并在未见任务上选择 DAG。结果预期显示结构收益具有任务条件性，而非复杂图普遍优于单 agent。
 
-```text
-Task structure signature
-          │
-          ▼
-Auditable workflow runtime
-  ├── E       = Executor
-  ├── P+E     = Planner → Executor
-  ├── E+V+R   = Executor → Verifier → Repair
-  └── Full    = Planner → Executor → Verifier → Repair
-          │
-          ▼
-Action ledger + typed artifacts + checkpoints + controlled replay
-          │
-          ▼
-Auditable workflow profile for later same-family tasks
-```
+摘要只在数据支持后填入三类数字：P0 replay validity、AppWorld 分层成功/成本、冻结 profile 的 held-out utility。
 
-Planner 和 Verifier 只读；Repair 只接收 verifier 的 discrepancy 和必要状态。每个阶段持久化 artifact/hash、真实 API action、token、真实 latency、预算、初始/中间/final state hash 和官方 strict success。
+## 1. Introduction
 
-## 因果边界
+1. 工具 agent 的 workflow 选择影响成功、延迟和成本；现有整体 MAS 比较难解释“为什么”。
+2. 状态ful任务使事后删除一个组件不再是有效反事实：世界状态已经变化。
+3. 缺口：缺乏对 workflow 内部结构的、可复放且基线不污染的局部因果证据；也缺乏将证据转成下一任务选择的简单机制。
+4. 贡献：类型化 DAG compiler/executor、checkpoint replay intervention engine、冻结 causal profile policy、AppWorld 主证据与 time-boxed 外部验证。
 
-组件实验测量同一任务和 seed 下的配对总干预效应。边实验从同一上游 checkpoint 启动，替换一条 typed artifact 后仅重跑下游，估计“给定 checkpoint 的受控下游效应”。这不是对开放世界的自然直接效应，也不等同于一般因果发现。
+## 2. Problem Definition
 
-## 实验链
+固定控制平面 `planner → DAG executor → final evaluator`。定义任务内 DAG、节点 artifact、边、初始状态、成本和严格成功。写出节点/边/拓扑受控效应的估计对象与 checkpoint 来源；明确识别条件（确定性的恢复、固定上游、未污染 hash、配对负控制）。
 
-| 研究问题 | 实验 | 结论 |
-|---|---|---|
-| RQ1：什么 workflow 值得？ | E1：E、P+E、E+V+R、Full 的配对质量—成本比较 | 任务结构条件下的 Pareto 边界 |
-| RQ2：为什么值得？ | E2：组件移除、边 typed-null、passthrough replay control | 模块与信息边的受控效应和机制证据 |
-| RQ3：如何持续节省？ | E3：冻结 family stream 上的 workflow profile | 接近 Full 质量下的累计成本/延迟下降 |
+## 3. System
 
-P0–P3 的执行规模、冻结边界、统计方法和失败处理见 [CAUSAL_WORKFLOW_RESEARCH_PLAN.md](CAUSAL_WORKFLOW_RESEARCH_PLAN.md)。
+### 3.1 DAG compiler
 
-## 预期贡献
+预注册 G0–G3，验证无环、类型、工具权限和条件分支；不把本周系统包装成任意 DAG 生成器。
 
-1. 一种面向有状态 tool-use workflow 的可审计执行与 replay 表示。
-2. 一套区分组件总效应、信息边受控效应与 replay 负控制的实验协议。
-3. 基于归因证据的 workflow profile：仅复用任务结构与聚合效果，不携带先前会话的敏感状态。
-4. AppWorld 上关于复杂协作收益边界、机制和重复任务成本摊销的实证结果。
+### 3.2 DAG executor and observability
 
-## 不应主张
+每节点后持久化 artifact/hash/checkpoint/budget/真实 wall-clock；代码 executor 保持安全 batch policy。
 
-- Planner–Executor–Verifier 对所有任务或所有模型更优；
-- 单一 benchmark 的结果可泛化至所有真实 agent；
-- profile 能永久有效或可跨工具/模型版本无条件迁移；
-- 控制性 checkpoint 干预等同于开放环境中的全部因果关系。
+### 3.3 Intervention engine
+
+节点 skip、typed-null edge mask、只读 parallel-to-serial topology，及 passthrough replay。说明污染检测和失效样本处理。
+
+### 3.4 Frozen profile policy
+
+仅从 dev 选择 `task family → Gk`；test 不再更新。以成本效用选择与 always-G0/G3 作比较。
+
+## 4. Experimental Protocol
+
+按 P0–P3 写入冻结任务清单、预算、模型（DeepSeek）、种子、分层规则、主要/次要指标和停止规则。主 benchmark 为 AppWorld；MultiAgentBench 仅在 capability gate 通过时写为外部补充。
+
+## 5. Results
+
+1. P0：编译、checkpoint、hash、replay negative-control 通过率。
+2. E1：每个复杂度层 G0–G3 的 strict success、token、wall-clock、cost。
+3. E2：预注册节点/边/拓扑的配对下游效应与 replay validity。
+4. E3：冻结 profile 在 held-out test 的 utility 与固定 DAG 基线。
+5. External（若通过 timebox）：MultiAgentBench 的结构选择结果；否则删去主表。
+
+## 6. Discussion and Limitations
+
+局部而非完整因果图归因；小 DAG library；模型/提示/预算依赖；AppWorld 复杂度标签的构造效度；单 seed 的不确定性；外部 benchmark 不具备快照时不能声称同类因果审计。
+
+## 附录/复现包
+
+冻结配置与 manifest、DAG schema、每个 run 的 trace/artifact/checkpoint hash、排除原因、分析脚本、旧 fixed-S3 诊断与主结果的隔离说明。

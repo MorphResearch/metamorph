@@ -18,8 +18,9 @@ from adapters.appworld_code_executor import (
     validate_batch_code,
 )
 from adapters.appworld_contracts import SCHEMA_VERSION, PlannerArtifact, validate_artifact
-from adapters.appworld_experiment import AppWorldExperimentRunner, validate_task_manifest
+from adapters.appworld_experiment import AppWorldExperimentRunner, validate_experiment_config, validate_task_manifest
 from adapters.appworld_manifest import stratified_task_ids
+from adapters.appworld_dag import registered_dags
 from llm.adapters import OpenAICompatibleAdapter
 from scripts.analyze_appworld_results import paired_task_values
 
@@ -144,7 +145,7 @@ class ScriptedModel:
         usage = {"prompt_tokens": 10, "completion_tokens": 5}
         if phase == "tool_selector":
             return {"content": json.dumps({"schema_version": SCHEMA_VERSION, "tools": ["fake__read", "fake__write", "supervisor__complete_task"], "reason": "needed"}), "usage": usage}
-        if phase == "planner":
+        if phase == "planner" or phase in {"dag_inspect", "dag_inspect_a", "dag_inspect_b", "dag_join"}:
             return {"content": json.dumps({
                 "schema_version": SCHEMA_VERSION,
                 "status": "READY",
@@ -155,11 +156,11 @@ class ScriptedModel:
                 "risks": [],
                 "blocked_reason": None,
             }), "usage": usage}
-        if phase in {"executor", "repair", "replay_executor", "replay_repair"} and index == 0:
+        if phase in {"executor", "repair", "replay_executor", "replay_repair", "dag_act", "dag_repair"} and index == 0:
             available = {item["function"]["name"] for item in tools}
             assert "fake__write" in available
             return {"tool_calls": [{"id": "w", "name": "fake__write", "arguments": "{}"}], "usage": usage}
-        if phase in {"executor", "repair", "replay_executor", "replay_repair"}:
+        if phase in {"executor", "repair", "replay_executor", "replay_repair", "dag_act", "dag_repair"}:
             return {"content": json.dumps({
                 "schema_version": SCHEMA_VERSION,
                 "status": "COMPLETED",
@@ -168,7 +169,7 @@ class ScriptedModel:
                 "errors": [],
                 "final_answer": None,
             }), "usage": usage}
-        if "verifier" in phase:
+        if "verifier" in phase or phase in {"dag_check", "dag_final_check"}:
             return {"content": json.dumps({
                 "schema_version": SCHEMA_VERSION,
                 "status": "VERIFIED",
@@ -342,6 +343,35 @@ class AppWorldContractTests(unittest.TestCase):
             verifier_prompt = str(model.messages_by_phase["verifier"][-1]["content"])
             self.assertNotIn("PLANNER ARTIFACT", verifier_prompt)
             self.assertIn("EXECUTOR ARTIFACT", verifier_prompt)
+
+    def test_dag_runtime_is_the_new_task_workflow_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            world = FakeWorld(Path(directory) / "world")
+            controller = AppWorldController(
+                world=world,
+                model=ScriptedModel(),
+                limits=limits(),
+                trace_dir=Path(directory) / "trace",
+            )
+            result = controller.run_dag(registered_dags()["G2"])
+            self.assertTrue(world.state["done"])
+            execution = result["dag_execution"]
+            self.assertEqual("G2", execution["dag_id"])
+            self.assertEqual({"inspect_a", "inspect_b", "join", "act", "check"}, set(execution["checkpoints"]))
+            self.assertEqual({"initial", "node-inspect_a", "node-inspect_b", "node-join", "node-act", "node-check", "final"}, set(controller.checkpoints))
+
+    def test_dag_e1_config_accepts_only_registered_graphs(self):
+        config = {
+            "benchmark": "AppWorld", "experiment": "DAG_E1", "task_set": "dev",
+            "lessons": {"enabled": False}, "seeds": [1],
+            "model": {"temperature": 0.0, "prompt_version": "dag-v1", "tool_schema_version": "v1", "max_output_tokens_per_call": 1, "request_timeout_seconds": 1},
+            "budget": {"max_steps": 1, "max_errors": 1, "max_total_tokens": 1, "max_tool_calls": 1, "max_latency_seconds": 1, "allow_write": True},
+            "conditions": [{"id": "G2", "dag_id": "G2"}],
+        }
+        validate_experiment_config(config, formal=False)
+        config["conditions"] = [{"id": "invalid", "dag_id": "not-a-dag"}]
+        with self.assertRaises(ValueError):
+            validate_experiment_config(config, formal=False)
 
     def test_masked_replay_only_runs_downstream(self):
         with tempfile.TemporaryDirectory() as directory:

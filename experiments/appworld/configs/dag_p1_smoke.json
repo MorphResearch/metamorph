@@ -1,0 +1,32 @@
+{
+  "schema_version": "dag-v1",
+  "experiment_id": "appworld_dag_p1_smoke_v1",
+  "experiment": "DAG_E1",
+  "benchmark": "AppWorld",
+  "stage": "P1_smoke",
+  "task_set": "p1_dag_dev",
+  "lessons": {"enabled": false, "store_snapshot": null},
+  "model": {
+    "provider": "from_environment", "model_name_env": "METAMORPH_MODEL", "api_base_env": "METAMORPH_BASE_URL",
+    "temperature": 0.0, "max_output_tokens_per_call": 4096, "request_timeout_seconds": 120,
+    "prompt_version": "appworld_dag_v1", "tool_schema_version": "appworld_constrained_code_batch_v1"
+  },
+  "budget": {
+    "max_steps": 100, "max_errors": 5, "max_total_tokens": 150000, "max_tool_calls": 500,
+    "max_latency_seconds": 600, "allow_write": true,
+    "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0
+  },
+  "seeds": [300],
+  "conditions": [
+    {"id": "G0", "dag_id": "G0"},
+    {"id": "G1", "dag_id": "G1"},
+    {"id": "G2", "dag_id": "G2"},
+    {"id": "G3", "dag_id": "G3"}
+  ],
+  "statistical_plan": {
+    "primary_contrasts": ["G1 - G0", "G2 - G0", "G3 - G0"],
+    "unit": "paired task × seed", "primary_metric": "official strict success",
+    "secondary_metrics": ["total_tokens", "latency_seconds", "tool_calls", "cost_usd"]
+  },
+  "status": "p1_smoke_only_after_dag_p0_acceptance"
+}
