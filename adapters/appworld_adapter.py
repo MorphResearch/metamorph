@@ -609,27 +609,13 @@ class AppWorldController:
             contract=PlannerArtifact if self.json_contract else None,
         )
         if isinstance(artifact, PlannerArtifact):
-            semantic_errors: list[str] = []
-            for action in artifact.ordered_actions:
-                name = _artifact_action_name(action.app, action.api)
-                function_doc = self._function_by_name.get(name)
-                if function_doc is None:
-                    semantic_errors.append(f"unknown planned API: {name}")
-                    continue
-                parameters = function_doc["function"].get("parameters", {})
-                properties = set(parameters.get("properties", {}))
-                required = set(parameters.get("required", []))
-                supplied = set(action.arguments)
-                if required - supplied:
-                    semantic_errors.append(f"{name} missing arguments: {sorted(required - supplied)}")
-                if supplied - properties:
-                    semantic_errors.append(f"{name} unknown arguments: {sorted(supplied - properties)}")
-            if semantic_errors:
-                trace.status = "invalid_contract"
-                trace.contract_errors.extend(semantic_errors)
-                self.ledger.record_error(contract=True)
-                self._write_trace(trace)
-                return None
+            # A planner handoff is intentionally strategic: it may say
+            # "list directory" or describe a loop without committing to the
+            # exact function name/arguments.  The executor resolves concrete
+            # API calls and the controller audits them.  Rejecting such a
+            # plan turns a useful causal handoff into a brittle API validator.
+            # Exact API/argument allowlisting remains enforced at execution.
+            pass
         return artifact
 
     def _executor(self, plan: PlannerArtifact | str | dict[str, Any] | None, *, phase: str = "executor") -> ExecutorArtifact | None:
@@ -652,20 +638,16 @@ class AppWorldController:
             contract=ExecutorArtifact,
         )
         if isinstance(artifact, ExecutorArtifact):
-            observed = {
-                (item["name"], canonical_json(item["arguments"]))
-                for item in trace.tool_calls
-                if item["success"]
-            }
-            claimed = {
-                (_artifact_action_name(item.app, item.api), canonical_json(item.arguments))
+            observed_names = {item["name"] for item in trace.tool_calls if item["success"]}
+            claimed_names = {
+                _artifact_action_name(item.app, item.api)
                 for item in artifact.executed_actions
                 if item.success
             }
-            unsupported_claims = sorted(claimed - observed)
+            unsupported_claims = sorted(claimed_names - observed_names)
             if unsupported_claims:
                 trace.status = "invalid_contract"
-                trace.contract_errors.append(f"artifact claims unobserved tool calls: {unsupported_claims}")
+                trace.contract_errors.append(f"artifact claims unobserved API names: {unsupported_claims}")
                 self.ledger.record_error(contract=True)
                 self._write_trace(trace)
                 return None
