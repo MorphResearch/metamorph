@@ -246,6 +246,18 @@ def _safe_tool_code(function_name: str, arguments: dict[str, Any]) -> str:
     return f"print({function_name}(**{arguments!r}))"
 
 
+def _artifact_action_name(app: str, api: str) -> str:
+    """Accept contract actions written as either ``app``/``api`` or API name.
+
+    AppWorld's function-calling schemas expose names such as
+    ``file_system__show_file``.  Models therefore naturally put the complete
+    callable in the ``api`` field; concatenating its app namespace a second
+    time turns an otherwise observed action into a false hallucination.
+    """
+
+    return api if "__" in api else f"{app}__{api}"
+
+
 def _contract_instructions(contract: type[BaseModel]) -> str:
     return (
         "Return exactly one JSON object, with no markdown or surrounding prose. "
@@ -585,8 +597,9 @@ class AppWorldController:
         prompt = (
             "You are the strategy planner in a fixed planner→executor→verifier scaffold. Do not call tools: "
             "the executor resolves task-specific entities and values from the environment. Do not perform "
-            "requested mutations. Produce a compact, executable strategy and explicit verification criteria. "
-            "This artifact is a handoff, not an interaction log.\n\n"
+            "requested mutations. Produce at most six high-level actions; describe repeated work as one loop or "
+            "category, never as a per-item list. Use an unqualified API path in `api` (for example `login`) and "
+            "its namespace in `app` (for example `file_system`). This artifact is a handoff, not an interaction log.\n\n"
             f"TASK:\n{self.world.task.instruction}\n\n{schema}"
         )
         trace, artifact = self._run_phase(
@@ -598,7 +611,7 @@ class AppWorldController:
         if isinstance(artifact, PlannerArtifact):
             semantic_errors: list[str] = []
             for action in artifact.ordered_actions:
-                name = f"{action.app}__{action.api}"
+                name = _artifact_action_name(action.app, action.api)
                 function_doc = self._function_by_name.get(name)
                 if function_doc is None:
                     semantic_errors.append(f"unknown planned API: {name}")
@@ -645,7 +658,7 @@ class AppWorldController:
                 if item["success"]
             }
             claimed = {
-                (f"{item.app}__{item.api}", canonical_json(item.arguments))
+                (_artifact_action_name(item.app, item.api), canonical_json(item.arguments))
                 for item in artifact.executed_actions
                 if item.success
             }

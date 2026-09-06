@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from adapters.appworld_adapter import AppWorldController, isolated_provider_request
+from adapters.appworld_adapter import AppWorldController, _artifact_action_name, isolated_provider_request
 from adapters.appworld_budget import AppWorldBudgetLedger, BudgetExhausted, BudgetLimits
 from adapters.appworld_code_executor import (
     CODE_EXECUTOR_MARKER,
@@ -214,6 +214,10 @@ def limits(**overrides):
 
 
 class AppWorldContractTests(unittest.TestCase):
+    def test_contract_action_accepts_qualified_or_split_api_name(self):
+        self.assertEqual(_artifact_action_name("file_system", "login"), "file_system__login")
+        self.assertEqual(_artifact_action_name("file_system", "file_system__login"), "file_system__login")
+
     def test_isolated_provider_request_uses_spawn_safe_worker(self):
         response = isolated_provider_request(
             provider="mock",
