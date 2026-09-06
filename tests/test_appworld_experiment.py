@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -631,6 +632,20 @@ class AppWorldContractTests(unittest.TestCase):
             self.assertTrue(all(item["status"] == "completed" for item in results))
             self.assertEqual(results[1]["split"], "dev")
             self.assertFalse(results[1]["replay"]["replay_contamination"])
+            state = json.loads((root / "results" / "runs" / "Full" / "task-1" / "1" / "run_state.json").read_text())
+            self.assertEqual("finished", state["status"])
+            self.assertTrue((root / "results" / "runs" / "Full" / "task-1" / "1" / "arm.log").exists())
+            self.assertIsNone(results[0]["failure_reason"])
+
+            self.assertIsNone(runner._begin_arm("Probe", "task-1", 1))
+            with self.assertRaisesRegex(RuntimeError, "ARM_ALREADY_RUNNING"):
+                runner._begin_arm("Probe", "task-1", 1)
+            runner.arm_timeout_seconds = 0.01
+            timeout_result = runner._safe_run("Timeout", "task-1", 1, lambda: time.sleep(0.05))
+            self.assertEqual("timeout", timeout_result["status"])
+            self.assertEqual("arm_timeout", timeout_result["failure_reason"])
+            timeout_state = json.loads((root / "results" / "runs" / "Timeout" / "task-1" / "1" / "run_state.json").read_text())
+            self.assertEqual("timeout", timeout_state["status"])
 
     def test_paired_analysis_requires_matching_seeds(self):
         results = [

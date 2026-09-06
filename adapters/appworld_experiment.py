@@ -6,8 +6,10 @@ import json
 import hashlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,6 +21,48 @@ from .appworld_dag import Intervention, registered_dags
 
 
 WorldFactory = Callable[..., Any]
+
+
+class ArmTimeout(RuntimeError):
+    """Raised in the parent process when one arm exceeds its wall-clock limit."""
+
+
+def _utc_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _pid_is_alive(pid: Any) -> bool:
+    try:
+        value = int(pid)
+        if value <= 0:
+            return False
+        os.kill(value, 0)
+    except (TypeError, ValueError, OSError):
+        return False
+    return True
+
+
+@contextmanager
+def arm_timeout(seconds: float) -> Iterator[None]:
+    """Bound an arm without replacing the provider's per-request timeout."""
+
+    if seconds <= 0 or not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        # Signal timers cannot safely be installed from a worker thread;
+        # provider timeouts remain active in that case.
+        yield
+        return
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def expire(_signum: int, _frame: Any) -> None:
+        raise ArmTimeout(f"arm_timeout after {seconds:g} seconds")
+
+    signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 def sha256_file(path: Path) -> str:
@@ -128,6 +172,9 @@ def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
         raise ValueError("model.request_timeout_seconds must be positive")
     if float(timeout) > float(config["budget"]["max_latency_seconds"]):
         raise ValueError("request timeout cannot exceed per-task latency budget")
+    arm_timeout_seconds = config.get("run_control", {}).get("arm_timeout_seconds", 900)
+    if float(arm_timeout_seconds) <= 0:
+        raise ValueError("run_control.arm_timeout_seconds must be positive")
     if len(set(config.get("seeds", []))) != len(config.get("seeds", [])) or not config.get("seeds"):
         raise ValueError("seeds must be a non-empty unique list")
     if formal and len(config["seeds"]) == 1 and not bool(
@@ -251,6 +298,8 @@ class AppWorldExperimentRunner:
         if self.task_manifest.get("task_set") != self.config.get("task_set"):
             raise ValueError("task manifest task_set does not match experiment config")
         self.output_root.mkdir(parents=True, exist_ok=True)
+        self.arm_timeout_seconds = float(self.config.get("run_control", {}).get("arm_timeout_seconds", 900))
+        self._active_run_dir: Path | None = None
         expected = self.task_manifest.get("appworld_commit")
         actual = git_commit(self.appworld_dir)
         if expected and expected != actual:
@@ -290,6 +339,7 @@ class AppWorldExperimentRunner:
             "code_executor_source_hash": sha256_file(Path(__file__).with_name("appworld_code_executor.py")),
             "provider_adapter_source_hash": sha256_file(Path(__file__).parents[1] / "llm" / "adapters.py"),
             "provider_client_source_hash": sha256_file(Path(__file__).parents[1] / "llm" / "client.py"),
+            "experiment_runner_source_hash": sha256_file(Path(__file__)),
             "tool_schema_version": self.config["model"]["tool_schema_version"],
             "tool_policy": self.config["budget"].get("tool_policy"),
             "evaluator": {
@@ -318,6 +368,7 @@ class AppWorldExperimentRunner:
                 "code_executor_source_hash",
                 "provider_adapter_source_hash",
                 "provider_client_source_hash",
+                "experiment_runner_source_hash",
             )
             changed = [name for name in immutable if previous.get(name) != manifest.get(name)]
             if changed:
@@ -387,25 +438,120 @@ class AppWorldExperimentRunner:
 
     def _persist_result(self, run_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
         run_dir.mkdir(parents=True, exist_ok=True)
+        budget = result.get("budget") if isinstance(result.get("budget"), dict) else {}
+        for name in ("missing_token_usage_calls", "total_tokens", "latency_seconds", "budget_exhausted", "tool_calls"):
+            result.setdefault(name, budget.get(name))
+        result.setdefault("failure_reason", result.get("error"))
+        result.setdefault("exception_type", result.get("failure_category"))
+        result.setdefault("exception_message", result.get("error"))
+        result.setdefault("trace_paths", [str(path) for path in sorted((run_dir / "traces").glob("*.json"))])
+        result.setdefault("checkpoint_paths", {
+            name: value.get("path") for name, value in (result.get("checkpoints") or {}).items()
+            if isinstance(value, dict)
+        })
         path = run_dir / "result.json"
         path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         return result
 
+    def _write_run_state(self, run_dir: Path, state: dict[str, Any]) -> None:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        state["last_heartbeat_at"] = _utc_now()
+        path = run_dir / "run_state.json"
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+
+    def _append_arm_log(self, run_dir: Path, event: str, details: dict[str, Any]) -> None:
+        payload = {"time": _utc_now(), "event": event, **details}
+        with (run_dir / "arm.log").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+        print(f"[{payload['time']}] {event} {json.dumps(details, ensure_ascii=False, sort_keys=True)}", flush=True)
+
+    def _arm_event(self, event: str, details: dict[str, Any]) -> None:
+        if self._active_run_dir is None:
+            return
+        path = self._active_run_dir / "run_state.json"
+        state = load_json(path) if path.exists() else {"status": "running"}
+        if event == "STAGE_START":
+            state["current_stage"] = details.get("phase", "unknown")
+        self._write_run_state(self._active_run_dir, state)
+        self._append_arm_log(self._active_run_dir, event, details)
+
+    def _begin_arm(self, condition: str, task_id: str, seed: int) -> dict[str, Any] | None:
+        run_dir = self._run_dir(condition, task_id, seed)
+        result_path = run_dir / "result.json"
+        if result_path.exists():
+            print(f"ARM_ALREADY_FINISHED {condition} {task_id} {seed}", flush=True)
+            return load_json(result_path)
+        state_path = run_dir / "run_state.json"
+        if state_path.exists():
+            state = load_json(state_path)
+            if state.get("status") == "running" and _pid_is_alive(state.get("pid")):
+                raise RuntimeError(f"ARM_ALREADY_RUNNING {condition} {task_id} {seed} pid={state.get('pid')}")
+            if state.get("status") == "running":
+                state.update({"status": "stale", "failure_reason": "runner_process_not_alive"})
+                self._write_run_state(run_dir, state)
+                self._append_arm_log(run_dir, "ARM_STALE", {"previous_pid": state.get("pid")})
+        state = {
+            "status": "running", "pid": os.getpid(), "condition": condition,
+            "task_id": task_id, "seed": seed, "started_at": _utc_now(),
+            "last_heartbeat_at": _utc_now(), "current_stage": "initializing",
+        }
+        self._write_run_state(run_dir, state)
+        self._append_arm_log(run_dir, "ARM_START", {"condition": condition, "task_id": task_id, "seed": seed, "pid": os.getpid()})
+        return None
+
+    def _finish_arm(self, result: dict[str, Any]) -> None:
+        if self._active_run_dir is None:
+            return
+        terminal = "finished" if result.get("status") == "completed" else result.get("status", "failed")
+        state = load_json(self._active_run_dir / "run_state.json")
+        state.update({
+            "status": terminal,
+            "current_stage": "finished",
+            "finished_at": _utc_now(),
+            "failure_reason": result.get("failure_reason"),
+            "result_path": str(self._active_run_dir / "result.json"),
+        })
+        self._write_run_state(self._active_run_dir, state)
+        self._append_arm_log(self._active_run_dir, "ARM_SUCCESS" if terminal == "finished" else "ARM_FAILURE", {"status": terminal, "failure_reason": result.get("failure_reason")})
+
     def _safe_run(self, condition: str, task_id: str, seed: int, function: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        existing = self._begin_arm(condition, task_id, seed)
+        if existing is not None:
+            return existing
+        run_dir = self._run_dir(condition, task_id, seed)
+        self._active_run_dir = run_dir
         try:
-            return function()
-        except FileExistsError:
-            raise
+            with arm_timeout(self.arm_timeout_seconds):
+                result = function()
+        except ArmTimeout as exc:
+            result = {
+                **self._result_base(condition, task_id, seed), "status": "timeout", "official_reward": 0.0,
+                "strict_success": False, "protocol_valid": False,
+                "protocol_invalid_reasons": ["infrastructure_failure: arm_timeout"],
+                "failure_reason": "arm_timeout", "exception_type": type(exc).__name__, "exception_message": str(exc),
+            }
+            result = self._persist_result(run_dir, result)
         except Exception as exc:  # every failed arm remains in the paired dataset
             result = {
                 **self._result_base(condition, task_id, seed),
                 "status": "failed",
                 "official_reward": 0.0,
                 "strict_success": False,
+                "protocol_valid": False,
+                "protocol_invalid_reasons": [f"infrastructure_failure: {type(exc).__name__}"],
                 "error": str(exc),
                 "failure_category": type(exc).__name__,
+                "failure_reason": "runner_exception",
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
             }
-            return self._persist_result(self._run_dir(condition, task_id, seed), result)
+            result = self._persist_result(run_dir, result)
+        finally:
+            self._finish_arm(result)
+            self._active_run_dir = None
+        return result
 
     def run_condition(self, condition: str, task_id: str, seed: int) -> dict[str, Any]:
         if hasattr(self.model, "configure"):
@@ -446,6 +592,7 @@ class AppWorldExperimentRunner:
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
+            event_callback=self._arm_event,
         )
         try:
             route_record: dict[str, Any] | None = None
@@ -573,6 +720,7 @@ class AppWorldExperimentRunner:
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
+            event_callback=self._arm_event,
         )
         try:
             execution = controller.run_dag(
@@ -686,6 +834,7 @@ class AppWorldExperimentRunner:
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
+            event_callback=self._arm_event,
         )
         try:
             replay = controller.replay_masked_edge(

@@ -284,6 +284,7 @@ class AppWorldController:
         initial_usage: dict[str, Any] | None = None,
         require_token_usage: bool = False,
         request_timeout_seconds: float | None = None,
+        event_callback: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.world = world
         self.model = model
@@ -296,6 +297,7 @@ class AppWorldController:
         self.max_output_tokens = max_output_tokens
         self.require_token_usage = require_token_usage
         self.request_timeout_seconds = request_timeout_seconds
+        self.event_callback = event_callback
         self.traces: dict[str, PhaseTrace] = {}
         self.checkpoints: dict[str, dict[str, Any]] = {}
         self._function_docs = list(world.task.api_docs.function_calling())
@@ -307,7 +309,18 @@ class AppWorldController:
         self._function_by_name = {
             item["function"]["name"]: item for item in self._function_docs
         }
+        # AppWorld direct function calls are separate execution contexts.  If
+        # a direct login succeeds, a later direct API call cannot inherit its
+        # session and is stopped rather than being recorded as a false task
+        # failure. The model can retry with one constrained code batch.
+        self._direct_login_apps: set[str] = set()
         self.selected_tool_names: list[str] = []
+
+    def _emit_event(self, event: str, **details: Any) -> None:
+        """Best-effort arm observability; controller semantics never depend on it."""
+
+        if self.event_callback is not None:
+            self.event_callback(event, details)
 
     def _write_trace(self, trace: PhaseTrace) -> None:
         self.traces[trace.phase] = trace
@@ -319,6 +332,10 @@ class AppWorldController:
         # Login creates an authentication session but is allowed in read-only
         # phases and is not counted as a task-state write action.
         return str(doc.get("method", "POST")).upper() not in READ_METHODS and doc.get("api_name") != LOGIN_API
+
+    def _requires_session_safe_batch(self, tool_name: str) -> bool:
+        app, separator, api = tool_name.partition("__")
+        return bool(separator and api != LOGIN_API and app in self._direct_login_apps)
 
     def _tools(self, names: list[str], *, read_only: bool) -> list[dict[str, Any]]:
         output = []
@@ -459,6 +476,7 @@ class AppWorldController:
             status="running",
             started_at=time.clock_gettime(time.CLOCK_REALTIME),
         )
+        self._emit_event("STAGE_START", phase=phase)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "You are a bounded AppWorld experiment agent. Never use hidden ground truth."},
             {"role": "user", "content": prompt},
@@ -467,11 +485,22 @@ class AppWorldController:
         try:
             while True:
                 self.ledger.before_model_call(_estimate_tokens(messages, tools), self.max_output_tokens)
-                response = self.model.complete(
-                    phase=phase,
-                    messages=messages,
-                    tools=tools,
-                    max_output_tokens=self.max_output_tokens,
+                call_number = self.ledger.snapshot()["steps"] + 1
+                provider_started = time.clock_gettime(time.CLOCK_MONOTONIC)
+                self._emit_event("PROVIDER_START", phase=phase, call=call_number)
+                try:
+                    response = self.model.complete(
+                        phase=phase,
+                        messages=messages,
+                        tools=tools,
+                        max_output_tokens=self.max_output_tokens,
+                    )
+                except Exception as exc:
+                    self._emit_event("PROVIDER_END", phase=phase, call=call_number, error=f"{type(exc).__name__}: {exc}")
+                    raise
+                self._emit_event(
+                    "PROVIDER_END", phase=phase, call=call_number,
+                    latency_seconds=round(time.clock_gettime(time.CLOCK_MONOTONIC) - provider_started, 6),
                 )
                 content, tool_calls, usage = _response_parts(response)
                 has_token_usage = any(
@@ -517,16 +546,25 @@ class AppWorldController:
                                     trace=trace,
                                 )
                                 trace.tool_calls.extend(records)
+                                self._emit_event("TOOL_CALL", phase=phase, name=CODE_EXECUTOR_NAME, count=len(records))
                                 messages.append({"role": "tool", "tool_call_id": call_id, "content": output[:MAX_TOOL_OUTPUT_CHARS]})
                                 continue
                             if name not in allowed_names:
                                 self.ledger.safety_incidents += 1
                                 raise PermissionError(f"tool is not allowed in {phase}: {name}")
+                            if self._requires_session_safe_batch(name):
+                                raise RuntimeError(
+                                    f"SessionBatchRequired: {name} must be called with its login and dependent "
+                                    "authenticated APIs in one metamorph__execute_code batch"
+                                )
                             is_write = self._is_write(name)
                             self.ledger.before_tool_call(is_write=is_write)
                             output = str(self.world.execute(_safe_tool_code(name, arguments)))
                             self.ledger.after_tool_call()
                             ok = not output.startswith("Execution failed")
+                            app, separator, api = name.partition("__")
+                            if ok and separator and api == LOGIN_API:
+                                self._direct_login_apps.add(app)
                             if not ok:
                                 self.ledger.record_error(tool=True)
                         except (BudgetExhausted, PermissionError):
@@ -537,6 +575,7 @@ class AppWorldController:
                             self.ledger.record_error(tool=True)
                         record = {"name": name, "arguments": arguments, "output": output, "success": ok}
                         trace.tool_calls.append(record)
+                        self._emit_event("TOOL_CALL", phase=phase, name=name, success=ok)
                         messages.append({"role": "tool", "tool_call_id": call_id, "content": output[:MAX_TOOL_OUTPUT_CHARS]})
                     continue
 
@@ -545,6 +584,7 @@ class AppWorldController:
                     trace.status = "completed" if content.strip() else "failed_empty_output"
                     trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
                     self._write_trace(trace)
+                    self._emit_event("STAGE_END", phase=phase, status=trace.status)
                     return trace, content
 
                 artifact, errors = validate_artifact(content, contract)
@@ -553,6 +593,7 @@ class AppWorldController:
                     trace.artifact = artifact.model_dump(mode="json")
                     trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
                     self._write_trace(trace)
+                    self._emit_event("STAGE_END", phase=phase, status=trace.status)
                     return trace, artifact
                 trace.contract_errors.extend(errors)
                 self.ledger.record_error(contract=True)
@@ -560,6 +601,7 @@ class AppWorldController:
                     trace.status = "invalid_contract"
                     trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
                     self._write_trace(trace)
+                    self._emit_event("STAGE_END", phase=phase, status=trace.status)
                     return trace, None
                 contract_retry_used = True
                 messages.append({"role": "assistant", "content": content})
@@ -574,6 +616,7 @@ class AppWorldController:
             trace.contract_errors.append(str(exc))
             trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
             self._write_trace(trace)
+            self._emit_event("STAGE_END", phase=phase, status=trace.status)
             return trace, None
         except Exception as exc:
             self.ledger.cancel_model_call()
@@ -581,6 +624,7 @@ class AppWorldController:
             trace.contract_errors.append(f"{type(exc).__name__}: {exc}")
             trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
             self._write_trace(trace)
+            self._emit_event("STAGE_END", phase=phase, status=trace.status)
             raise
 
     def checkpoint(self, name: str) -> dict[str, Any]:
@@ -731,8 +775,9 @@ class AppWorldController:
             "tool with a loop; the controller records every individual API invocation in the immutable trace. "
             "If you mention the synthetic metamorph__execute_code tool in executed_actions, do so only when "
             "you actually invoked it; its expanded API calls remain the authoritative action audit. "
-            "Before an authenticated app API, call that app's login API in this run and use only its returned "
-            "access token; never invent, reuse, or transform credentials. "
+            "For any app exposing a login API, you must call login and every dependent authenticated API in the "
+            "same metamorph__execute_code batch; direct function calls for such apps are rejected because they lose "
+            "their session context. Never invent, reuse, or transform credentials. "
             "In the final JSON artifact, summarize only the material actions and state changes needed for the "
             "downstream verifier; do not try to duplicate the complete audit log.\n\n"
             f"TASK:\n{self.world.task.instruction}\n\nUPSTREAM ARTIFACT:\n{plan_text}\n\n"

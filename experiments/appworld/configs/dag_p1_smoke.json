@@ -16,6 +16,9 @@
     "max_latency_seconds": 600, "allow_write": true,
     "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0
   },
+  "run_control": {
+    "arm_timeout_seconds": 900
+  },
   "seeds": [300],
   "statistical_limitations": {
     "single_seed": true,
