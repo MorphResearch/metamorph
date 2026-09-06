@@ -1,0 +1,6 @@
+experiment,task_id,family,condition,seed,output_root,status,protocol_valid,strict_success,infrastructure_valid,included_in_primary_analysis,exclusion_reason,commit_hash
+Gate-1,6bdbc26_1,simple,G0,300,dag_p1_formal_orchestrated_v2_20260906,completed,true,true,true,false,engineering_smoke_only,c88d6af
+Gate-1,6bdbc26_1,simple,G1,300,dag_p1_formal_orchestrated_v2_20260906,completed,true,true,true,false,engineering_smoke_only,c88d6af
+Gate-1,6bdbc26_1,simple,G2,300,dag_p1_formal_orchestrated_v2_20260906,completed,true,true,true,false,engineering_smoke_only,c88d6af
+Gate-1,6bdbc26_1,simple,G3,300,dag_p1_formal_orchestrated_v2_20260906,not_started,,,,false,pending_gate_check,c88d6af
+Gate-1,6bdbc26_1,simple,G2,300,dag_p1_formal_orchestrated_20260906,failed,false,false,false,runner_state_file_race,c7c0a74

@@ -1,0 +1,51 @@
+{
+  "schema_version": "appworld.task-manifest.v1",
+  "benchmark": "AppWorld",
+  "task_set": "p1_dag_dev_v1",
+  "appworld_commit": "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
+  "selection_protocol": {
+    "source": "public task instructions only",
+    "selection_time_utc": "2026-09-06",
+    "selection_reason": "P1 profile-selection development set; excluded every task ID with an existing result.json under experiments/appworld/runs at freeze time",
+    "previously_run": false,
+    "family_labels": {
+      "e7a10f8_2": "simple",
+      "27e1026_1": "simple",
+      "4ec8de5_1": "simple",
+      "fac291d_2": "simple",
+      "c901732_2": "medium",
+      "ccb4494_1": "medium",
+      "07b42fd_3": "medium",
+      "57c3486_2": "medium",
+      "aa8502b_2": "complex",
+      "692c77d_2": "complex",
+      "3c13f5a_3": "complex",
+      "6171bbc_2": "complex"
+    },
+    "selection_reasons": {
+      "e7a10f8_2": "single-app aggregate duration query",
+      "27e1026_1": "single-app historical lookup across libraries",
+      "4ec8de5_1": "single-app release-date count query",
+      "fac291d_2": "single-app deduplicated count query",
+      "c901732_2": "single-app filtered playback action",
+      "ccb4494_1": "single-app queue-wide mutation",
+      "07b42fd_3": "single-app thresholded batch follow",
+      "57c3486_2": "single-app relation-based batch like",
+      "aa8502b_2": "cross-collection conditional unfollow",
+      "692c77d_2": "conditional library-wide rating mutation",
+      "3c13f5a_3": "file-to-Venmo multi-party request workflow",
+      "6171bbc_2": "per-playlist optimization plus playlist construction"
+    }
+  },
+  "splits": {
+    "train_simple": ["e7a10f8_2", "27e1026_1"],
+    "dev_simple": ["4ec8de5_1", "fac291d_2"],
+    "train_medium": ["c901732_2", "ccb4494_1", "07b42fd_3"],
+    "dev_medium": ["57c3486_2"],
+    "train_complex": ["aa8502b_2", "692c77d_2", "3c13f5a_3"],
+    "dev_complex": ["6171bbc_2"]
+  },
+  "task_ids": ["e7a10f8_2", "27e1026_1", "4ec8de5_1", "fac291d_2", "c901732_2", "ccb4494_1", "07b42fd_3", "57c3486_2", "aa8502b_2", "692c77d_2", "3c13f5a_3", "6171bbc_2"],
+  "task_count": 12,
+  "selection_hash": "e1aa069e21fdd6dddfda9b3f6895b74db68c7b5207b622a4e3840a4e77671dab"
+}

@@ -1,0 +1,60 @@
+{
+  "schema_version": "dag-v1",
+  "experiment_id": "appworld_dag_p1_dev_v1",
+  "experiment": "DAG_E1",
+  "benchmark": "AppWorld",
+  "stage": "P1_dev_profile_selection",
+  "task_set": "p1_dag_dev_v1",
+  "lessons": {"enabled": false, "store_snapshot": null},
+  "model": {
+    "provider": "from_environment",
+    "model_name_env": "METAMORPH_MODEL",
+    "api_base_env": "METAMORPH_BASE_URL",
+    "frozen_model_id": "deepseek-v4-pro",
+    "temperature": 0.0,
+    "max_output_tokens_per_call": 2048,
+    "request_timeout_seconds": 90,
+    "prompt_version": "appworld_dag_v1",
+    "tool_schema_version": "appworld_constrained_code_batch_v1"
+  },
+  "budget": {
+    "max_steps": 100,
+    "max_errors": 10,
+    "max_total_tokens": 150000,
+    "max_tool_calls": 500,
+    "max_latency_seconds": 600,
+    "allow_write": true,
+    "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1",
+    "emergency_multiplier": 2.0
+  },
+  "run_control": {"arm_timeout_seconds": 900},
+  "pricing": {
+    "input_usd_per_million_tokens": 1.32,
+    "output_usd_per_million_tokens": 3.96,
+    "basis": "DeepSeek-V4-Pro peak cache-miss rates, frozen 2026-09-06; input is conservatively priced as cache-miss because provider usage has no cache-token field"
+  },
+  "utility": {
+    "definition": "strict_success_binary - lambda_cost_usd * cost_usd",
+    "lambda_cost_usd": [0.25, 1.0, 4.0],
+    "selection_rule": "P1 only; freeze one readable family_to_dag profile immediately after P1 completion"
+  },
+  "seeds": [300],
+  "statistical_limitations": {
+    "single_seed": true,
+    "note": "P1 is a development-only profile-selection screen; it is not a held-out inferential result."
+  },
+  "conditions": [
+    {"id": "G0", "dag_id": "G0"},
+    {"id": "G1", "dag_id": "G1"},
+    {"id": "G2", "dag_id": "G2"},
+    {"id": "G3", "dag_id": "G3"}
+  ],
+  "statistical_plan": {
+    "primary_contrasts": ["G1 - G0", "G2 - G0", "G3 - G0"],
+    "unit": "paired task x seed",
+    "primary_metric": "official strict success",
+    "secondary_metrics": ["total_tokens", "latency_seconds", "tool_calls", "cost_usd"],
+    "family_labels_source": "p1_dag_dev_v1 manifest public-instruction labels"
+  },
+  "status": "frozen_before_p1_formal_run"
+}
