@@ -699,6 +699,8 @@ class AppWorldController:
             "If this is a repair, apply only the minimum corrections. Complete the active task through the "
             "supervisor API when appropriate. For repeated or bulk API work, use the constrained code-batch "
             "tool with a loop; the controller records every individual API invocation in the immutable trace. "
+            "Before an authenticated app API, call that app's login API in this run and use only its returned "
+            "access token; never invent, reuse, or transform credentials. "
             "In the final JSON artifact, summarize only the material actions and state changes needed for the "
             "downstream verifier; do not try to duplicate the complete audit log.\n\n"
             f"TASK:\n{self.world.task.instruction}\n\nUPSTREAM ARTIFACT:\n{plan_text}\n\n"

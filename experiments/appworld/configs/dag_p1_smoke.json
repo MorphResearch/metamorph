@@ -1,6 +1,6 @@
 {
   "schema_version": "dag-v1",
-  "experiment_id": "appworld_dag_p1_smoke_v3",
+  "experiment_id": "appworld_dag_p1_smoke_v5",
   "experiment": "DAG_E1",
   "benchmark": "AppWorld",
   "stage": "P1_smoke",
@@ -12,7 +12,7 @@
     "prompt_version": "appworld_dag_v1", "tool_schema_version": "appworld_constrained_code_batch_v1"
   },
   "budget": {
-    "max_steps": 100, "max_errors": 5, "max_total_tokens": 150000, "max_tool_calls": 500,
+    "max_steps": 100, "max_errors": 10, "max_total_tokens": 150000, "max_tool_calls": 500,
     "max_latency_seconds": 600, "allow_write": true,
     "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0
   },
