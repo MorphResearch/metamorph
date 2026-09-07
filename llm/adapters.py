@@ -173,7 +173,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             request_client = self.client.with_options(**options)
         elif timeout is not None:
             kwargs["timeout"] = timeout
-        for key in ("temperature", "seed", "max_tokens"):
+        for key in ("temperature", "seed", "max_tokens", "response_format"):
             if generation_options.get(key) is not None:
                 kwargs[key] = generation_options[key]
         response = request_client.chat.completions.create(**kwargs)

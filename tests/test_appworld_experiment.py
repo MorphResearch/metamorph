@@ -20,7 +20,7 @@ from adapters.appworld_code_executor import (
     instrument_batch_code,
     validate_batch_code,
 )
-from adapters.appworld_contracts import SCHEMA_VERSION, PlannerArtifact, validate_artifact
+from adapters.appworld_contracts import SCHEMA_VERSION, PlannerArtifact, VerifierArtifact, validate_artifact
 from adapters.appworld_experiment import AppWorldExperimentRunner, default_world_factory, validate_experiment_config, validate_task_manifest
 from adapters.appworld_manifest import stratified_task_ids
 from adapters.appworld_dag import Intervention, registered_dags
@@ -202,6 +202,48 @@ class CodeBatchClaimModel(ScriptedModel):
         return super().complete(phase=phase, messages=messages, tools=tools, max_output_tokens=max_output_tokens)
 
 
+class DsmlFinalizationModel:
+    """Models a provider that leaks private tool markup into content."""
+
+    model_name = "dsml-finalization"
+
+    def __init__(self, *, retry_once: bool = False):
+        self.retry_once = retry_once
+        self.finalization_messages: list[list[dict]] = []
+        self.finalization_calls = 0
+
+    @staticmethod
+    def _usage():
+        return {"prompt_tokens": 10, "completion_tokens": 5}
+
+    @staticmethod
+    def _artifact():
+        return json.dumps({
+            "schema_version": SCHEMA_VERSION,
+            "status": "NOT_VERIFIED",
+            "checks": [{"criterion": "done is true", "evidence": "state was not confirmed", "passed": False}],
+            "discrepancies": ["done was not confirmed"],
+            "repair_instructions": ["Complete the task using the allowed execution tools."],
+        })
+
+    def complete(self, *, phase, messages, tools, max_output_tokens):
+        del phase, messages, max_output_tokens
+        assert tools
+        return {
+            "content": "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"fake__read\">\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>",
+            "usage": self._usage(),
+        }
+
+    def complete_finalization(self, *, phase, messages, tools, max_output_tokens):
+        del phase, max_output_tokens
+        assert tools == []
+        self.finalization_messages.append(deepcopy(messages))
+        self.finalization_calls += 1
+        if self.retry_once and self.finalization_calls == 1:
+            return {"content": "not json", "usage": self._usage()}
+        return {"content": self._artifact(), "usage": self._usage()}
+
+
 class CapturingCompletions:
     def __init__(self):
         self.kwargs = None
@@ -378,9 +420,45 @@ class AppWorldContractTests(unittest.TestCase):
             self.assertIn("planner", controller.traces)
             self.assertIn("executor", controller.traces)
             self.assertIn("verifier", controller.traces)
-            verifier_prompt = str(model.messages_by_phase["verifier"][-1]["content"])
-            self.assertNotIn("PLANNER ARTIFACT", verifier_prompt)
-            self.assertIn("EXECUTOR ARTIFACT", verifier_prompt)
+            verifier_context = "\n".join(
+                str(message.get("content", "")) for message in model.messages_by_phase["verifier"]
+            )
+            self.assertNotIn("PLANNER ARTIFACT", verifier_context)
+            self.assertIn("EXECUTOR ARTIFACT", verifier_context)
+
+    def test_dsml_markup_is_not_executed_and_finalization_commits_verifier_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            world = FakeWorld(Path(directory) / "world")
+            model = DsmlFinalizationModel()
+            controller = AppWorldController(
+                world=world, model=model, limits=limits(), trace_dir=Path(directory) / "trace"
+            )
+            trace, artifact = controller._run_phase(
+                "dag_check", "check", controller._tools(["fake__read"], read_only=True), contract=VerifierArtifact
+            )
+            self.assertEqual("completed", trace.status)
+            self.assertIsInstance(artifact, VerifierArtifact)
+            self.assertEqual("NOT_VERIFIED", artifact.status)
+            self.assertEqual([], world.executed)
+            self.assertEqual(1, len(trace.provider_protocol_mismatches))
+            self.assertEqual(1, len(trace.finalization_attempts))
+            finalization_context = model.finalization_messages[0]
+            self.assertTrue(any("DSML" in str(message.get("content", "")) for message in finalization_context))
+            self.assertIn("Tool interaction is now complete", str(finalization_context[-1]["content"]))
+
+    def test_artifact_finalization_allows_exactly_one_strict_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = AppWorldController(
+                world=FakeWorld(Path(directory) / "world"), model=DsmlFinalizationModel(retry_once=True),
+                limits=limits(), trace_dir=Path(directory) / "trace",
+            )
+            trace, artifact = controller._run_phase(
+                "dag_check", "check", controller._tools(["fake__read"], read_only=True), contract=VerifierArtifact
+            )
+            self.assertEqual("completed", trace.status)
+            self.assertIsInstance(artifact, VerifierArtifact)
+            self.assertEqual(2, len(trace.finalization_attempts))
+            self.assertTrue(trace.contract_errors)
 
     def test_dag_runtime_is_the_new_task_workflow_path(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -546,11 +624,15 @@ class AppWorldContractTests(unittest.TestCase):
             model_name="test-model",
             messages=[{"role": "user", "content": "route"}],
             tools=[],
-            generation_options={"temperature": 0.0, "seed": 7, "max_tokens": 10, "timeout": 12.5},
+            generation_options={
+                "temperature": 0.0, "seed": 7, "max_tokens": 10, "timeout": 12.5,
+                "response_format": {"type": "json_object"},
+            },
         )
         self.assertNotIn("tools", completions.kwargs)
         self.assertNotIn("tool_choice", completions.kwargs)
         self.assertEqual(completions.kwargs["timeout"], 12.5)
+        self.assertEqual(completions.kwargs["response_format"], {"type": "json_object"})
 
     def test_provider_phase_binds_timeout_and_disables_sdk_retries(self):
         completions = CapturingCompletions()

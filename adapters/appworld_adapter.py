@@ -192,6 +192,40 @@ class ProviderPhaseModel:
             seconds=self.request_timeout_seconds,
         )
 
+    def complete_finalization(
+        self,
+        *,
+        phase: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_output_tokens: int,
+    ) -> Any:
+        """Request a terminal artifact, never another tool interaction.
+
+        JSON mode is deliberately confined to this request: the preceding
+        phase can use native function calling, while this request can only
+        commit the typed handoff from the already-observed evidence.
+        """
+
+        del phase
+        generation_options = {
+            "temperature": self.temperature,
+            "seed": self.seed,
+            "max_tokens": max_output_tokens,
+            "timeout": self.request_timeout_seconds,
+            "response_format": {"type": "json_object"},
+        }
+        return isolated_provider_request(
+            provider=self.provider,
+            model_name=self.model_name,
+            base_url=self.base_url,
+            api_key_env=self.api_key_env,
+            messages=messages,
+            tools=tools,
+            generation_options=generation_options,
+            seconds=self.request_timeout_seconds,
+        )
+
 
 @dataclass
 class PhaseTrace:
@@ -201,6 +235,8 @@ class PhaseTrace:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     code_batches: list[dict[str, Any]] = field(default_factory=list)
     contract_errors: list[str] = field(default_factory=list)
+    provider_protocol_mismatches: list[str] = field(default_factory=list)
+    finalization_attempts: list[dict[str, Any]] = field(default_factory=list)
     artifact: dict[str, Any] | None = None
     started_at: float = 0.0
     latency_seconds: float = 0.0
@@ -221,6 +257,13 @@ def _response_parts(response: Any) -> tuple[str, list[dict[str, Any]], dict[str,
         list(getattr(response, "tool_calls", None) or []),
         dict(getattr(response, "usage", None) or {}),
     )
+
+
+def _contains_unstructured_tool_markup(content: str) -> bool:
+    """Detect, but never execute, provider-private tool-call markup."""
+
+    lowered = content.lower()
+    return "dsml" in lowered and "tool_call" in lowered
 
 
 def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
@@ -421,6 +464,137 @@ class AppWorldController:
         summary = visible_output or f"Code batch executed {len(calls)} API call(s)."
         return summary, records, bool(batch_record["success"])
 
+    def _call_model(
+        self,
+        *,
+        phase: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        finalization: bool = False,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Make one accounted provider call, optionally in terminal JSON mode."""
+
+        self.ledger.before_model_call(_estimate_tokens(messages, tools), self.max_output_tokens)
+        call_number = self.ledger.snapshot()["steps"] + 1
+        provider_started = time.clock_gettime(time.CLOCK_MONOTONIC)
+        self._emit_event("PROVIDER_START", phase=phase, call=call_number, finalization=finalization)
+        try:
+            if finalization and callable(getattr(self.model, "complete_finalization", None)):
+                response = self.model.complete_finalization(
+                    phase=phase,
+                    messages=messages,
+                    tools=tools,
+                    max_output_tokens=self.max_output_tokens,
+                )
+            else:
+                response = self.model.complete(
+                    phase=phase,
+                    messages=messages,
+                    tools=tools,
+                    max_output_tokens=self.max_output_tokens,
+                )
+        except Exception as exc:
+            self._emit_event(
+                "PROVIDER_END", phase=phase, call=call_number, finalization=finalization,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+        self._emit_event(
+            "PROVIDER_END", phase=phase, call=call_number, finalization=finalization,
+            latency_seconds=round(time.clock_gettime(time.CLOCK_MONOTONIC) - provider_started, 6),
+        )
+        content, tool_calls, usage = _response_parts(response)
+        has_token_usage = any(
+            key in usage
+            for key in ("prompt_tokens", "input_tokens", "completion_tokens", "output_tokens", "total_tokens")
+        )
+        if not has_token_usage:
+            self.ledger.missing_token_usage_calls += 1
+            if self.require_token_usage:
+                raise RuntimeError("provider response is missing token usage in formal mode")
+        self.ledger.record_model_call(usage)
+        return content, tool_calls
+
+    @staticmethod
+    def _finalization_prompt(contract: type[BaseModel]) -> str:
+        evidence_rule = (
+            "If the available evidence is insufficient to verify success, return NOT_VERIFIED with concrete "
+            "non-empty repair_instructions."
+            if contract is VerifierArtifact
+            else "Use only the evidence already present in the conversation."
+        )
+        return (
+            "Tool interaction is now complete. Do not call tools, request additional information, or continue "
+            "reasoning through tool use. Commit the final typed artifact using only the evidence already present. "
+            + evidence_rule
+            + "\n\n"
+            + _contract_instructions(contract)
+        )
+
+    def _finalize_artifact(
+        self,
+        *,
+        phase: str,
+        messages: list[dict[str, Any]],
+        contract: type[BaseModel],
+        trace: PhaseTrace,
+        allow_contract_retry: bool,
+    ) -> BaseModel | None:
+        """Commit one typed artifact after the tool loop has terminated."""
+
+        finalization_messages = [*messages, {"role": "user", "content": self._finalization_prompt(contract)}]
+        attempts = 2 if allow_contract_retry else 1
+        for attempt in range(1, attempts + 1):
+            self._emit_event("ARTIFACT_FINALIZATION_START", phase=phase, attempt=attempt)
+            content, tool_calls = self._call_model(
+                phase=phase,
+                messages=finalization_messages,
+                tools=[],
+                finalization=True,
+            )
+            record = {
+                "attempt": attempt,
+                "tools_enabled": False,
+                "json_mode_requested": True,
+                "content_chars": len(content),
+                "structured_tool_calls_returned": len(tool_calls),
+            }
+            trace.finalization_attempts.append(record)
+            trace.answer = content
+            errors: list[str] = []
+            if tool_calls:
+                message = "provider_protocol_mismatch: structured tool call returned during tools-disabled artifact finalization"
+                trace.provider_protocol_mismatches.append(message)
+                errors.append(message)
+            if _contains_unstructured_tool_markup(content):
+                message = "provider_protocol_mismatch: unstructured DSML-like tool markup returned during artifact finalization"
+                trace.provider_protocol_mismatches.append(message)
+                errors.append(message)
+            artifact, validation_errors = validate_artifact(content, contract)
+            errors.extend(validation_errors)
+            if artifact is not None and not tool_calls:
+                trace.status = "completed"
+                trace.artifact = artifact.model_dump(mode="json")
+                self._emit_event("ARTIFACT_FINALIZATION_END", phase=phase, attempt=attempt, status="completed")
+                return artifact
+
+            trace.contract_errors.extend(errors)
+            self.ledger.record_error(contract=True)
+            self._emit_event("ARTIFACT_FINALIZATION_END", phase=phase, attempt=attempt, status="invalid_contract")
+            if attempt == attempts:
+                trace.status = "invalid_contract"
+                return None
+            finalization_messages.extend([
+                {"role": "assistant", "content": content},
+                {
+                    "role": "user",
+                    "content": "Your previous artifact was invalid: " + " | ".join(errors)
+                    + "\nDo not call tools. Return only one corrected JSON object.\n\n"
+                    + self._finalization_prompt(contract),
+                },
+            ])
+        raise AssertionError("unreachable finalization state")
+
     def _tool_catalog(self) -> dict[str, str]:
         return {
             name: str(doc.get("description", ""))
@@ -481,37 +655,24 @@ class AppWorldController:
             {"role": "system", "content": "You are a bounded AppWorld experiment agent. Never use hidden ground truth."},
             {"role": "user", "content": prompt},
         ]
-        contract_retry_used = False
         try:
+            # Tool-free stages are artifact commitments from the outset.  They
+            # skip a redundant reasoning call while retaining the same strict
+            # terminal JSON protocol as tool-using stages.
+            if contract is not None and not tools:
+                artifact = self._finalize_artifact(
+                    phase=phase,
+                    messages=messages,
+                    contract=contract,
+                    trace=trace,
+                    allow_contract_retry=allow_contract_retry,
+                )
+                trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
+                self._write_trace(trace)
+                self._emit_event("STAGE_END", phase=phase, status=trace.status)
+                return trace, artifact
             while True:
-                self.ledger.before_model_call(_estimate_tokens(messages, tools), self.max_output_tokens)
-                call_number = self.ledger.snapshot()["steps"] + 1
-                provider_started = time.clock_gettime(time.CLOCK_MONOTONIC)
-                self._emit_event("PROVIDER_START", phase=phase, call=call_number)
-                try:
-                    response = self.model.complete(
-                        phase=phase,
-                        messages=messages,
-                        tools=tools,
-                        max_output_tokens=self.max_output_tokens,
-                    )
-                except Exception as exc:
-                    self._emit_event("PROVIDER_END", phase=phase, call=call_number, error=f"{type(exc).__name__}: {exc}")
-                    raise
-                self._emit_event(
-                    "PROVIDER_END", phase=phase, call=call_number,
-                    latency_seconds=round(time.clock_gettime(time.CLOCK_MONOTONIC) - provider_started, 6),
-                )
-                content, tool_calls, usage = _response_parts(response)
-                has_token_usage = any(
-                    key in usage
-                    for key in ("prompt_tokens", "input_tokens", "completion_tokens", "output_tokens", "total_tokens")
-                )
-                if not has_token_usage:
-                    self.ledger.missing_token_usage_calls += 1
-                    if self.require_token_usage:
-                        raise RuntimeError("provider response is missing token usage in formal mode")
-                self.ledger.record_model_call(usage)
+                content, tool_calls = self._call_model(phase=phase, messages=messages, tools=tools)
                 if tool_calls:
                     messages.append({
                         "role": "assistant",
@@ -579,37 +740,34 @@ class AppWorldController:
                         messages.append({"role": "tool", "tool_call_id": call_id, "content": output[:MAX_TOOL_OUTPUT_CHARS]})
                     continue
 
-                trace.answer = content
                 if contract is None:
+                    trace.answer = content
                     trace.status = "completed" if content.strip() else "failed_empty_output"
                     trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
                     self._write_trace(trace)
                     self._emit_event("STAGE_END", phase=phase, status=trace.status)
                     return trace, content
 
-                artifact, errors = validate_artifact(content, contract)
-                if artifact is not None:
-                    trace.status = "completed"
-                    trace.artifact = artifact.model_dump(mode="json")
-                    trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
-                    self._write_trace(trace)
-                    self._emit_event("STAGE_END", phase=phase, status=trace.status)
-                    return trace, artifact
-                trace.contract_errors.extend(errors)
-                self.ledger.record_error(contract=True)
-                if not allow_contract_retry or contract_retry_used:
-                    trace.status = "invalid_contract"
-                    trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
-                    self._write_trace(trace)
-                    self._emit_event("STAGE_END", phase=phase, status=trace.status)
-                    return trace, None
-                contract_retry_used = True
-                messages.append({"role": "assistant", "content": content})
-                messages.append({
-                    "role": "user",
-                    "content": "Your previous output violated the contract: " + " | ".join(errors) + "\nReturn only a corrected JSON object.",
-                })
-                tools = []
+                # A provider-private tool-call encoding in content is never
+                # interpreted or executed.  It is retained as evidence for
+                # finalization and made explicit in the immutable trace.
+                if _contains_unstructured_tool_markup(content):
+                    trace.provider_protocol_mismatches.append(
+                        "provider_protocol_mismatch: unstructured DSML-like tool markup ended the tool phase"
+                    )
+                if content:
+                    messages.append({"role": "assistant", "content": content})
+                artifact = self._finalize_artifact(
+                    phase=phase,
+                    messages=messages,
+                    contract=contract,
+                    trace=trace,
+                    allow_contract_retry=allow_contract_retry,
+                )
+                trace.latency_seconds = round(time.clock_gettime(time.CLOCK_MONOTONIC) - started, 6)
+                self._write_trace(trace)
+                self._emit_event("STAGE_END", phase=phase, status=trace.status)
+                return trace, artifact
         except (BudgetExhausted, PermissionError) as exc:
             self.ledger.cancel_model_call()
             trace.status = "budget_stopped" if isinstance(exc, BudgetExhausted) else "permission_stopped"
