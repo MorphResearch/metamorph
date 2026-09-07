@@ -1,0 +1,53 @@
+{
+  "schema_version": "dag-v1",
+  "experiment_id": "appworld_dag_core_context_validation_v3",
+  "experiment": "DAG_E1",
+  "benchmark": "AppWorld",
+  "stage": "pre_freeze_bounded_node_execution_validation",
+  "task_set": "context_projection_validation_v3",
+  "lessons": {"enabled": false, "store_snapshot": null},
+  "model": {
+    "provider": "from_environment", "model_name_env": "METAMORPH_MODEL", "api_base_env": "METAMORPH_BASE_URL",
+    "frozen_model_id": "deepseek-v4-pro", "temperature": 0.0, "max_output_tokens_per_call": 2048,
+    "request_timeout_seconds": 90, "prompt_version": "appworld_dag_bounded_node_execution_v3",
+    "tool_schema_version": "appworld_constrained_code_batch_v1"
+  },
+  "context_projection": {
+    "mode": "deterministic_cross_node_projection_node_local_transcript_v2",
+    "max_model_visible_tool_chars": 6000, "max_model_visible_evidence_chars": 12000,
+    "max_model_visible_node_transcript_chars": 12000, "max_model_visible_list_items": 8,
+    "full_trace_policy": "persist_raw_environment_log_and_immutable_phase_trace",
+    "finalization_context": "node_objective_plus_projected_upstream_artifacts_plus_bounded_node_local_transcript_plus_contract"
+  },
+  "node_execution": {
+    "mode": "controller_enforced_bounded_tool_phase_v3",
+    "max_tool_rounds_per_node": 8,
+    "max_tool_calls_per_node": 24,
+    "on_cap": "force_existing_strict_artifact_finalization_with_observed_evidence",
+    "duplicate_call_guard": false
+  },
+  "budget": {
+    "max_steps": 100, "max_errors": 10, "max_total_tokens": 150000, "max_tool_calls": 500,
+    "max_latency_seconds": 600, "allow_write": true,
+    "tool_policy": "appworld_constrained_code_batch_with_function_fallback_v1", "emergency_multiplier": 2.0,
+    "downstream_reservations": {"check": 18000, "finalization": 4096}
+  },
+  "run_control": {"arm_timeout_seconds": 900},
+  "pricing": {
+    "input_usd_per_million_tokens": 1.32, "output_usd_per_million_tokens": 3.96,
+    "basis": "DeepSeek-V4-Pro peak cache-miss rates, frozen 2026-09-06; input is conservatively priced as cache-miss because provider usage has no cache-token field"
+  },
+  "utility": {
+    "definition": "strict_success_binary - lambda_cost_usd * cost_usd", "lambda_cost_usd": [0.25, 1.0, 4.0],
+    "selection_rule": "not used in validation; final profile is created only from final P1"
+  },
+  "seeds": [300],
+  "statistical_limitations": {"single_seed": true, "note": "Four-arm engineering validation only; excluded from P1/P3/profile/effect statistics."},
+  "conditions": [{"id": "G0", "dag_id": "G0"}, {"id": "G2", "dag_id": "G2"}],
+  "statistical_plan": {
+    "unit": "task x condition x seed", "primary_metric": "protocol_valid",
+    "secondary_metrics": ["total_tokens", "input_tokens", "output_tokens", "latency_seconds", "tool_calls", "cost_usd"],
+    "comparison_rule": "report all four arms; do not use this validation set for profile selection"
+  },
+  "status": "pre_freeze_validation"
+}

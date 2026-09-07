@@ -183,6 +183,12 @@ def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
     ):
         if name in projection and int(projection[name]) <= 0:
             raise ValueError(f"context_projection.{name} must be positive")
+    node_execution = config.get("node_execution", {})
+    if node_execution and not isinstance(node_execution, dict):
+        raise ValueError("node_execution must be an object")
+    for name in ("max_tool_rounds_per_node", "max_tool_calls_per_node"):
+        if name in node_execution and int(node_execution[name]) <= 0:
+            raise ValueError(f"node_execution.{name} must be positive")
     reservations = config["budget"].get("downstream_reservations", {})
     if reservations and not isinstance(reservations, dict):
         raise ValueError("budget.downstream_reservations must be an object")
@@ -623,6 +629,12 @@ class AppWorldExperimentRunner:
             max_model_visible_list_items=int(
                 self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)
             ),
+            max_tool_rounds_per_node=int(
+                self.config.get("node_execution", {}).get("max_tool_rounds_per_node", 8)
+            ),
+            max_tool_calls_per_node=int(
+                self.config.get("node_execution", {}).get("max_tool_calls_per_node", 24)
+            ),
             downstream_reservations=dict(self.config["budget"].get("downstream_reservations", {})),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
@@ -758,6 +770,8 @@ class AppWorldExperimentRunner:
                 self.config.get("context_projection", {}).get("max_model_visible_node_transcript_chars", 12_000)
             ),
             max_model_visible_list_items=int(self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)),
+            max_tool_rounds_per_node=int(self.config.get("node_execution", {}).get("max_tool_rounds_per_node", 8)),
+            max_tool_calls_per_node=int(self.config.get("node_execution", {}).get("max_tool_calls_per_node", 24)),
             downstream_reservations=dict(self.config["budget"].get("downstream_reservations", {})),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
@@ -879,6 +893,8 @@ class AppWorldExperimentRunner:
                 self.config.get("context_projection", {}).get("max_model_visible_node_transcript_chars", 12_000)
             ),
             max_model_visible_list_items=int(self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)),
+            max_tool_rounds_per_node=int(self.config.get("node_execution", {}).get("max_tool_rounds_per_node", 8)),
+            max_tool_calls_per_node=int(self.config.get("node_execution", {}).get("max_tool_calls_per_node", 24)),
             downstream_reservations=dict(self.config["budget"].get("downstream_reservations", {})),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),

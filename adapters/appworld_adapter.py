@@ -242,6 +242,7 @@ class PhaseTrace:
     finalization_attempts: list[dict[str, Any]] = field(default_factory=list)
     model_calls: list[dict[str, Any]] = field(default_factory=list)
     node_transcript: list[dict[str, Any]] = field(default_factory=list)
+    tool_loop_termination: dict[str, Any] | None = None
     context_projection: dict[str, Any] = field(default_factory=dict)
     artifact: dict[str, Any] | None = None
     started_at: float = 0.0
@@ -334,6 +335,8 @@ class AppWorldController:
         max_model_visible_evidence_chars: int = DEFAULT_MAX_MODEL_VISIBLE_EVIDENCE_CHARS,
         max_model_visible_node_transcript_chars: int = DEFAULT_MAX_MODEL_VISIBLE_NODE_TRANSCRIPT_CHARS,
         max_model_visible_list_items: int = DEFAULT_MAX_MODEL_VISIBLE_LIST_ITEMS,
+        max_tool_rounds_per_node: int = 8,
+        max_tool_calls_per_node: int = 24,
         downstream_reservations: dict[str, int] | None = None,
         initial_usage: dict[str, Any] | None = None,
         require_token_usage: bool = False,
@@ -353,6 +356,8 @@ class AppWorldController:
         self.max_model_visible_evidence_chars = max(1, int(max_model_visible_evidence_chars))
         self.max_model_visible_node_transcript_chars = max(1, int(max_model_visible_node_transcript_chars))
         self.max_model_visible_list_items = max(1, int(max_model_visible_list_items))
+        self.max_tool_rounds_per_node = max(1, int(max_tool_rounds_per_node))
+        self.max_tool_calls_per_node = max(1, int(max_tool_calls_per_node))
         self.downstream_reservations = {
             str(name): max(0, int(value))
             for name, value in (downstream_reservations or {}).items()
@@ -799,12 +804,16 @@ class AppWorldController:
             {"role": "user", "content": self._node_objective(prompt)},
         ]
         node_local_turns: list[list[dict[str, Any]]] = []
+        tool_rounds = 0
+        requested_tool_calls = 0
         trace.context_projection = {
             "mode": "deterministic_cross_node_projection_node_local_transcript_v2",
             "max_model_visible_tool_chars": self.max_model_visible_tool_chars,
             "max_model_visible_evidence_chars": self.max_model_visible_evidence_chars,
             "max_model_visible_node_transcript_chars": self.max_model_visible_node_transcript_chars,
             "max_model_visible_list_items": self.max_model_visible_list_items,
+            "max_tool_rounds_per_node": self.max_tool_rounds_per_node,
+            "max_tool_calls_per_node": self.max_tool_calls_per_node,
         }
         try:
             # Tool-free stages are artifact commitments from the outset.  They
@@ -829,6 +838,28 @@ class AppWorldController:
                 content, tool_calls = self._call_model(
                     phase=phase, messages=request_messages, tools=tools, trace=trace
                 )
+                if tool_calls:
+                    # The controller, rather than the model, owns the end of
+                    # a tool phase. Do not append an unexecuted assistant tool
+                    # call to the transcript: that would create an orphaned
+                    # continuation pair. Existing evidence is instead passed
+                    # directly to the strict artifact finalizer below.
+                    if (
+                        tool_rounds >= self.max_tool_rounds_per_node
+                        or requested_tool_calls + len(tool_calls) > self.max_tool_calls_per_node
+                    ):
+                        trace.tool_loop_termination = {
+                            "reason": "tool_call_cap_before_execution",
+                            "tool_rounds_completed": tool_rounds,
+                            "requested_tool_calls_completed": requested_tool_calls,
+                            "discarded_tool_calls": len(tool_calls),
+                            "max_tool_rounds_per_node": self.max_tool_rounds_per_node,
+                            "max_tool_calls_per_node": self.max_tool_calls_per_node,
+                        }
+                        tool_calls = []
+                    else:
+                        tool_rounds += 1
+                        requested_tool_calls += len(tool_calls)
                 if tool_calls:
                     allowed_names = {item["function"]["name"] for item in tools}
                     assistant_message = {
@@ -924,7 +955,19 @@ class AppWorldController:
                             "model_visible_content": visible, "truncation": metadata,
                         })
                     node_local_turns.append(local_turn)
-                    continue
+                    if (
+                        tool_rounds >= self.max_tool_rounds_per_node
+                        or requested_tool_calls >= self.max_tool_calls_per_node
+                    ):
+                        trace.tool_loop_termination = {
+                            "reason": "tool_execution_cap_reached",
+                            "tool_rounds_completed": tool_rounds,
+                            "requested_tool_calls_completed": requested_tool_calls,
+                            "max_tool_rounds_per_node": self.max_tool_rounds_per_node,
+                            "max_tool_calls_per_node": self.max_tool_calls_per_node,
+                        }
+                    else:
+                        continue
 
                 if contract is None:
                     trace.answer = content

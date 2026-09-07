@@ -394,6 +394,44 @@ class AppWorldContractTests(unittest.TestCase):
             self.assertEqual("read-1", transcript_tool["tool_call_id"])
             self.assertEqual(200, len(transcript_tool["content"]))
 
+    def test_node_tool_round_cap_forces_strict_artifact_finalization(self):
+        class LoopingModel:
+            model_name = "looping"
+
+            def __init__(self):
+                self.calls = 0
+                self.tools_by_call: list[list[dict]] = []
+
+            def complete(self, *, phase, messages, tools, max_output_tokens):
+                del phase, messages, max_output_tokens
+                self.tools_by_call.append(deepcopy(tools))
+                self.calls += 1
+                usage = {"prompt_tokens": 1, "completion_tokens": 1}
+                if self.calls <= 2:
+                    return {"tool_calls": [{"id": f"read-{self.calls}", "name": "fake__read", "arguments": "{}"}], "usage": usage}
+                return {"content": json.dumps({
+                    "schema_version": SCHEMA_VERSION, "status": "COMPLETED",
+                    "executed_actions": [{"app": "fake", "api": "read", "arguments": {}, "observation": "read", "success": True}],
+                    "claimed_state_changes": [], "errors": [], "final_answer": None,
+                }), "usage": usage}
+
+        with tempfile.TemporaryDirectory() as directory:
+            world = FakeWorld(Path(directory) / "world")
+            model = LoopingModel()
+            controller = AppWorldController(
+                world=world, model=model, limits=limits(), trace_dir=Path(directory) / "trace",
+                max_tool_rounds_per_node=2, max_tool_calls_per_node=8,
+            )
+            trace, artifact = controller._run_phase(
+                "executor", "execute", controller._tools(["fake__read"], read_only=True), contract=ExecutorArtifact
+            )
+            self.assertEqual("completed", trace.status)
+            self.assertIsNotNone(artifact)
+            self.assertEqual(2, len(trace.tool_calls))
+            self.assertEqual("tool_execution_cap_reached", trace.tool_loop_termination["reason"])
+            self.assertEqual(2, trace.tool_loop_termination["tool_rounds_completed"])
+            self.assertEqual([], model.tools_by_call[-1])
+
     def test_strict_contract_rejects_markdown_and_missing_fields(self):
         artifact, errors = validate_artifact("```json\n{}\n```", PlannerArtifact)
         self.assertIsNone(artifact)
