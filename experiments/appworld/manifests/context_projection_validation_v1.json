@@ -1,0 +1,28 @@
+{
+  "schema_version": "appworld.task-manifest.v1",
+  "benchmark": "AppWorld",
+  "task_set": "context_projection_validation_v1",
+  "appworld_commit": "a072b7a86e7c1d5b1d7175659d750ebb9b79f10a",
+  "selection_protocol": {
+    "source": "public task instructions only",
+    "selection_time_utc": "2026-09-07",
+    "purpose": "pre-freeze deterministic context-projection validation only; never P1/P3/profile data",
+    "previously_run": false,
+    "family_labels": {
+      "fddb6b6_3": "medium",
+      "92fe421_3": "complex"
+    },
+    "selection_reasons": {
+      "fddb6b6_3": "single-app email retrieval and forwarding workflow",
+      "92fe421_3": "cross-app Amazon-to-Venmo equal-share request workflow"
+    },
+    "exclusions_checked": ["p1_dag_dev_v1", "p3_e1", "p3_e2", "existing experiments/appworld/runs result.json"]
+  },
+  "splits": {
+    "validation_medium": ["fddb6b6_3"],
+    "validation_complex": ["92fe421_3"]
+  },
+  "task_ids": ["fddb6b6_3", "92fe421_3"],
+  "task_count": 2,
+  "selection_hash": "83b295a77f8db3ef3a353b289dfcd84686312e331b51b090cb4259d27f954395"
+}

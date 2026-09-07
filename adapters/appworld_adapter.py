@@ -42,7 +42,9 @@ from .appworld_dag import DAGExecutor, DAGNode, DAGSpec, Intervention
 
 READ_METHODS = {"GET"}
 LOGIN_API = "login"
-MAX_TOOL_OUTPUT_CHARS = 20_000
+DEFAULT_MAX_MODEL_VISIBLE_TOOL_CHARS = 6_000
+DEFAULT_MAX_MODEL_VISIBLE_EVIDENCE_CHARS = 12_000
+DEFAULT_MAX_MODEL_VISIBLE_LIST_ITEMS = 8
 # Tool schemas are repeated on every function-calling turn.  A smaller fixed
 # shortlist keeps the executor's context from crowding out its handoff
 # artifact while still leaving enough room for cross-app tasks.
@@ -237,6 +239,8 @@ class PhaseTrace:
     contract_errors: list[str] = field(default_factory=list)
     provider_protocol_mismatches: list[str] = field(default_factory=list)
     finalization_attempts: list[dict[str, Any]] = field(default_factory=list)
+    model_calls: list[dict[str, Any]] = field(default_factory=list)
+    context_projection: dict[str, Any] = field(default_factory=dict)
     artifact: dict[str, Any] | None = None
     started_at: float = 0.0
     latency_seconds: float = 0.0
@@ -324,6 +328,10 @@ class AppWorldController:
         enable_verifier: bool = True,
         enable_repair: bool = True,
         max_output_tokens: int = 4096,
+        max_model_visible_tool_chars: int = DEFAULT_MAX_MODEL_VISIBLE_TOOL_CHARS,
+        max_model_visible_evidence_chars: int = DEFAULT_MAX_MODEL_VISIBLE_EVIDENCE_CHARS,
+        max_model_visible_list_items: int = DEFAULT_MAX_MODEL_VISIBLE_LIST_ITEMS,
+        downstream_reservations: dict[str, int] | None = None,
         initial_usage: dict[str, Any] | None = None,
         require_token_usage: bool = False,
         request_timeout_seconds: float | None = None,
@@ -338,6 +346,13 @@ class AppWorldController:
         self.enable_verifier = enable_verifier
         self.enable_repair = enable_repair
         self.max_output_tokens = max_output_tokens
+        self.max_model_visible_tool_chars = max(1, int(max_model_visible_tool_chars))
+        self.max_model_visible_evidence_chars = max(1, int(max_model_visible_evidence_chars))
+        self.max_model_visible_list_items = max(1, int(max_model_visible_list_items))
+        self.downstream_reservations = {
+            str(name): max(0, int(value))
+            for name, value in (downstream_reservations or {}).items()
+        }
         self.require_token_usage = require_token_usage
         self.request_timeout_seconds = request_timeout_seconds
         self.event_callback = event_callback
@@ -358,6 +373,7 @@ class AppWorldController:
         # failure. The model can retry with one constrained code batch.
         self._direct_login_apps: set[str] = set()
         self.selected_tool_names: list[str] = []
+        self._active_dag_has_check = False
 
     def _emit_event(self, event: str, **details: Any) -> None:
         """Best-effort arm observability; controller semantics never depend on it."""
@@ -369,6 +385,82 @@ class AppWorldController:
         self.traces[trace.phase] = trace
         path = self.trace_dir / f"{trace.phase}.json"
         path.write_text(json.dumps(trace.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _project_json_value(self, value: Any) -> Any:
+        """Bound large structured tool values without calling another model."""
+
+        if isinstance(value, dict):
+            return {str(name): self._project_json_value(item) for name, item in value.items()}
+        if isinstance(value, list):
+            projected = [self._project_json_value(item) for item in value[: self.max_model_visible_list_items]]
+            if len(value) > self.max_model_visible_list_items:
+                projected.append({
+                    "truncated": True,
+                    "original_item_count": len(value),
+                    "retained_item_count": self.max_model_visible_list_items,
+                })
+            return projected
+        return value
+
+    def _project_tool_output(self, output: str) -> tuple[str, dict[str, Any]]:
+        """Create the deterministic, explicitly marked tool view sent to a model."""
+
+        raw = str(output)
+        metadata: dict[str, Any] = {"original_size": len(raw), "truncated": False}
+        try:
+            structured = json.loads(raw)
+        except (TypeError, ValueError):
+            structured = None
+        if structured is not None:
+            candidate = json.dumps(self._project_json_value(structured), ensure_ascii=False, sort_keys=True)
+        else:
+            candidate = raw
+        if len(candidate) > self.max_model_visible_tool_chars:
+            candidate = candidate[: self.max_model_visible_tool_chars]
+            metadata["truncated"] = True
+        metadata["visible_size"] = len(candidate)
+        if metadata["truncated"]:
+            candidate += "\n[TRUNCATED: original_size=%d]" % metadata["original_size"]
+        return candidate, metadata
+
+    @staticmethod
+    def _node_objective(prompt: str) -> str:
+        """Remove a duplicated final JSON schema from the tool-phase context."""
+
+        marker = "Return exactly one JSON object, with no markdown or surrounding prose."
+        return prompt.split(marker, 1)[0].rstrip()
+
+    def _project_phase_messages(
+        self,
+        *,
+        base_messages: list[dict[str, Any]],
+        evidence: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Build a phase-local context instead of replaying raw chat history."""
+
+        if not evidence:
+            return list(base_messages)
+        rendered = json.dumps(evidence, ensure_ascii=False, sort_keys=True)
+        if len(rendered) > self.max_model_visible_evidence_chars:
+            rendered = rendered[-self.max_model_visible_evidence_chars :]
+            rendered = "[TRUNCATED_EVIDENCE: retained tail]\n" + rendered
+        return [
+            *base_messages,
+            {
+                "role": "user",
+                "content": "DETERMINISTIC NODE EVIDENCE (not a full conversation history):\n" + rendered,
+            },
+        ]
+
+    def _reservation_for(self, phase: str, *, finalization: bool) -> int:
+        if finalization:
+            return 0
+        normalized = phase.removeprefix("dag_")
+        if normalized in {"act", "executor", "repair"} and self._active_dag_has_check:
+            return self.downstream_reservations.get("check", 0)
+        if normalized in {"check", "verifier", "final_check", "verifier_after_repair"}:
+            return self.downstream_reservations.get("finalization", 0)
+        return 0
 
     def _is_write(self, tool_name: str) -> bool:
         doc = self._standard_docs.get(tool_name, {})
@@ -470,11 +562,18 @@ class AppWorldController:
         phase: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        trace: PhaseTrace,
         finalization: bool = False,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Make one accounted provider call, optionally in terminal JSON mode."""
 
-        self.ledger.before_model_call(_estimate_tokens(messages, tools), self.max_output_tokens)
+        estimated_input_tokens = _estimate_tokens(messages, tools)
+        reserved_downstream_tokens = self._reservation_for(phase, finalization=finalization)
+        self.ledger.before_model_call(
+            estimated_input_tokens,
+            self.max_output_tokens,
+            reserved_downstream_tokens=reserved_downstream_tokens,
+        )
         call_number = self.ledger.snapshot()["steps"] + 1
         provider_started = time.clock_gettime(time.CLOCK_MONOTONIC)
         self._emit_event("PROVIDER_START", phase=phase, call=call_number, finalization=finalization)
@@ -513,6 +612,17 @@ class AppWorldController:
             if self.require_token_usage:
                 raise RuntimeError("provider response is missing token usage in formal mode")
         self.ledger.record_model_call(usage)
+        trace.model_calls.append({
+            "call": call_number,
+            "finalization": finalization,
+            "estimated_input_tokens": estimated_input_tokens,
+            "reserved_downstream_tokens": reserved_downstream_tokens,
+            "input_tokens": int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0),
+            "output_tokens": int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0),
+            "total_tokens": int(usage.get("total_tokens", 0) or 0),
+            "message_chars": len(json.dumps(messages, ensure_ascii=False)),
+            "tool_schema_chars": len(json.dumps(tools, ensure_ascii=False)),
+        })
         return content, tool_calls
 
     @staticmethod
@@ -550,6 +660,7 @@ class AppWorldController:
                 phase=phase,
                 messages=finalization_messages,
                 tools=[],
+                trace=trace,
                 finalization=True,
             )
             record = {
@@ -651,10 +762,17 @@ class AppWorldController:
             started_at=time.clock_gettime(time.CLOCK_REALTIME),
         )
         self._emit_event("STAGE_START", phase=phase)
-        messages: list[dict[str, Any]] = [
+        base_messages: list[dict[str, Any]] = [
             {"role": "system", "content": "You are a bounded AppWorld experiment agent. Never use hidden ground truth."},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": self._node_objective(prompt)},
         ]
+        evidence: list[dict[str, Any]] = []
+        trace.context_projection = {
+            "mode": "deterministic_phase_local_v1",
+            "max_model_visible_tool_chars": self.max_model_visible_tool_chars,
+            "max_model_visible_evidence_chars": self.max_model_visible_evidence_chars,
+            "max_model_visible_list_items": self.max_model_visible_list_items,
+        }
         try:
             # Tool-free stages are artifact commitments from the outset.  They
             # skip a redundant reasoning call while retaining the same strict
@@ -662,7 +780,7 @@ class AppWorldController:
             if contract is not None and not tools:
                 artifact = self._finalize_artifact(
                     phase=phase,
-                    messages=messages,
+                    messages=self._project_phase_messages(base_messages=base_messages, evidence=evidence),
                     contract=contract,
                     trace=trace,
                     allow_contract_retry=allow_contract_retry,
@@ -672,20 +790,11 @@ class AppWorldController:
                 self._emit_event("STAGE_END", phase=phase, status=trace.status)
                 return trace, artifact
             while True:
-                content, tool_calls = self._call_model(phase=phase, messages=messages, tools=tools)
+                request_messages = self._project_phase_messages(base_messages=base_messages, evidence=evidence)
+                content, tool_calls = self._call_model(
+                    phase=phase, messages=request_messages, tools=tools, trace=trace
+                )
                 if tool_calls:
-                    messages.append({
-                        "role": "assistant",
-                        "content": content or None,
-                        "tool_calls": [
-                            {
-                                "id": item.get("id") or f"{phase}-{len(trace.tool_calls)}-{index}",
-                                "type": "function",
-                                "function": {"name": item.get("name", ""), "arguments": item.get("arguments", "{}")},
-                            }
-                            for index, item in enumerate(tool_calls)
-                        ],
-                    })
                     allowed_names = {item["function"]["name"] for item in tools}
                     for index, call in enumerate(tool_calls):
                         name = str(call.get("name", ""))
@@ -708,7 +817,8 @@ class AppWorldController:
                                 )
                                 trace.tool_calls.extend(records)
                                 self._emit_event("TOOL_CALL", phase=phase, name=CODE_EXECUTOR_NAME, count=len(records))
-                                messages.append({"role": "tool", "tool_call_id": call_id, "content": output[:MAX_TOOL_OUTPUT_CHARS]})
+                                visible, metadata = self._project_tool_output(output)
+                                evidence.append({"tool": name, "success": ok, "output": visible, **metadata})
                                 continue
                             if name not in allowed_names:
                                 self.ledger.safety_incidents += 1
@@ -737,7 +847,8 @@ class AppWorldController:
                         record = {"name": name, "arguments": arguments, "output": output, "success": ok}
                         trace.tool_calls.append(record)
                         self._emit_event("TOOL_CALL", phase=phase, name=name, success=ok)
-                        messages.append({"role": "tool", "tool_call_id": call_id, "content": output[:MAX_TOOL_OUTPUT_CHARS]})
+                        visible, metadata = self._project_tool_output(output)
+                        evidence.append({"tool": name, "success": ok, "output": visible, **metadata})
                     continue
 
                 if contract is None:
@@ -756,10 +867,11 @@ class AppWorldController:
                         "provider_protocol_mismatch: unstructured DSML-like tool markup ended the tool phase"
                     )
                 if content:
-                    messages.append({"role": "assistant", "content": content})
+                    visible, metadata = self._project_tool_output(content)
+                    evidence.append({"assistant_content": visible, **metadata})
                 artifact = self._finalize_artifact(
                     phase=phase,
-                    messages=messages,
+                    messages=self._project_phase_messages(base_messages=base_messages, evidence=evidence),
                     contract=contract,
                     trace=trace,
                     allow_contract_retry=allow_contract_retry,
@@ -857,6 +969,7 @@ class AppWorldController:
         tests and in AppWorld runs.
         """
 
+        self._active_dag_has_check = any(node.operator == "check" for node in spec.nodes)
         self.checkpoint("initial")
         if selected_tools is None:
             self.select_tools()

@@ -77,16 +77,23 @@ class AppWorldBudgetLedger:
         self.termination_reason = f"budget exhausted: {name}"
         raise BudgetExhausted(self.termination_reason)
 
-    def before_model_call(self, estimated_input_tokens: int, max_output_tokens: int) -> None:
+    def before_model_call(
+        self,
+        estimated_input_tokens: int,
+        max_output_tokens: int,
+        *,
+        reserved_downstream_tokens: int = 0,
+    ) -> None:
         with self._lock:
             thread_id = get_ident()
             if thread_id in self._model_reservations:
                 raise RuntimeError("model token reservation already exists for this thread")
             reservation = max(0, estimated_input_tokens) + max(1, max_output_tokens)
+            downstream = max(0, reserved_downstream_tokens)
             self._check("max_steps", self.steps + 1, self.limits.max_steps)
             self._check(
                 "max_total_tokens",
-                self.total_tokens + sum(self._model_reservations.values()) + reservation,
+                self.total_tokens + sum(self._model_reservations.values()) + reservation + downstream,
                 self.limits.max_total_tokens,
             )
             self._check("max_latency_seconds", self.elapsed, self.limits.max_latency_seconds)

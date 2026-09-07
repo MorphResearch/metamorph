@@ -172,6 +172,17 @@ def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
         raise ValueError("model.request_timeout_seconds must be positive")
     if float(timeout) > float(config["budget"]["max_latency_seconds"]):
         raise ValueError("request timeout cannot exceed per-task latency budget")
+    projection = config.get("context_projection", {})
+    if projection and not isinstance(projection, dict):
+        raise ValueError("context_projection must be an object")
+    for name in ("max_model_visible_tool_chars", "max_model_visible_evidence_chars", "max_model_visible_list_items"):
+        if name in projection and int(projection[name]) <= 0:
+            raise ValueError(f"context_projection.{name} must be positive")
+    reservations = config["budget"].get("downstream_reservations", {})
+    if reservations and not isinstance(reservations, dict):
+        raise ValueError("budget.downstream_reservations must be an object")
+    if isinstance(reservations, dict) and any(int(value) < 0 for value in reservations.values()):
+        raise ValueError("budget.downstream_reservations values must be non-negative")
     arm_timeout_seconds = config.get("run_control", {}).get("arm_timeout_seconds", 900)
     if float(arm_timeout_seconds) <= 0:
         raise ValueError("run_control.arm_timeout_seconds must be positive")
@@ -595,6 +606,16 @@ class AppWorldExperimentRunner:
                 else component.get("disable_feature") != "repair_loop"
             ),
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
+            max_model_visible_tool_chars=int(
+                self.config.get("context_projection", {}).get("max_model_visible_tool_chars", 6_000)
+            ),
+            max_model_visible_evidence_chars=int(
+                self.config.get("context_projection", {}).get("max_model_visible_evidence_chars", 12_000)
+            ),
+            max_model_visible_list_items=int(
+                self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)
+            ),
+            downstream_reservations=dict(self.config["budget"].get("downstream_reservations", {})),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
             event_callback=self._arm_event,
@@ -723,6 +744,10 @@ class AppWorldExperimentRunner:
             enable_verifier=True,
             enable_repair=True,
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
+            max_model_visible_tool_chars=int(self.config.get("context_projection", {}).get("max_model_visible_tool_chars", 6_000)),
+            max_model_visible_evidence_chars=int(self.config.get("context_projection", {}).get("max_model_visible_evidence_chars", 12_000)),
+            max_model_visible_list_items=int(self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)),
+            downstream_reservations=dict(self.config["budget"].get("downstream_reservations", {})),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
             event_callback=self._arm_event,
@@ -837,6 +862,10 @@ class AppWorldExperimentRunner:
             enable_verifier=True,
             enable_repair=True,
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
+            max_model_visible_tool_chars=int(self.config.get("context_projection", {}).get("max_model_visible_tool_chars", 6_000)),
+            max_model_visible_evidence_chars=int(self.config.get("context_projection", {}).get("max_model_visible_evidence_chars", 12_000)),
+            max_model_visible_list_items=int(self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)),
+            downstream_reservations=dict(self.config["budget"].get("downstream_reservations", {})),
             require_token_usage=self.formal,
             request_timeout_seconds=float(self.config["model"]["request_timeout_seconds"]),
             event_callback=self._arm_event,
