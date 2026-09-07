@@ -43,3 +43,24 @@ predeclared limit, no task is retried and no further G3 smoke arm is started.  P
 remain unstarted until this missing mechanism evidence is resolved under an explicitly
 approved protocol decision; the frozen P1 manifest/config and profile-freeze boundary
 remain unchanged.
+
+## V3 artifact-finalization follow-up
+
+The later, explicitly approved protocol-adapter repair in commit `fd7354d` separates
+tool interaction from a tools-disabled JSON artifact-finalization request.  It neither
+parses nor executes DSML-like content.  A fresh formal preflight and one fresh smoke
+arm, `530b157_3 × G3 × seed 300`, were run under the isolated root
+`dag_p1_formal_orchestrated_v3_20260907`; no v2 artifact was overwritten or reused.
+
+The v3 selector finalized successfully in JSON mode.  The act node also finalized
+successfully after its one permitted JSON-only correction retry.  The check node
+performed its read-only interaction but stopped before its first finalization request
+because the shared frozen token limit was exhausted (`145,986 / 150,000` tokens;
+16 model calls, 21 tool calls).  All accounting and traces are present; there was no
+provider exception, state race, or duplicate arm.  This is an auditable valid budget
+stop, not repair evidence.  In particular, it still did not produce a
+`VerifierArtifact(status=NOT_VERIFIED)`, repair artifact, or final-check artifact.
+
+Therefore the Gate decision remains **NOT COMPLETE**.  The v3 smoke is excluded from
+primary analysis and cannot be compared numerically with v2 because its protocol adds
+terminal artifact-finalization calls.
