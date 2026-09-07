@@ -44,6 +44,7 @@ READ_METHODS = {"GET"}
 LOGIN_API = "login"
 DEFAULT_MAX_MODEL_VISIBLE_TOOL_CHARS = 6_000
 DEFAULT_MAX_MODEL_VISIBLE_EVIDENCE_CHARS = 12_000
+DEFAULT_MAX_MODEL_VISIBLE_NODE_TRANSCRIPT_CHARS = 12_000
 DEFAULT_MAX_MODEL_VISIBLE_LIST_ITEMS = 8
 # Tool schemas are repeated on every function-calling turn.  A smaller fixed
 # shortlist keeps the executor's context from crowding out its handoff
@@ -240,6 +241,7 @@ class PhaseTrace:
     provider_protocol_mismatches: list[str] = field(default_factory=list)
     finalization_attempts: list[dict[str, Any]] = field(default_factory=list)
     model_calls: list[dict[str, Any]] = field(default_factory=list)
+    node_transcript: list[dict[str, Any]] = field(default_factory=list)
     context_projection: dict[str, Any] = field(default_factory=dict)
     artifact: dict[str, Any] | None = None
     started_at: float = 0.0
@@ -330,6 +332,7 @@ class AppWorldController:
         max_output_tokens: int = 4096,
         max_model_visible_tool_chars: int = DEFAULT_MAX_MODEL_VISIBLE_TOOL_CHARS,
         max_model_visible_evidence_chars: int = DEFAULT_MAX_MODEL_VISIBLE_EVIDENCE_CHARS,
+        max_model_visible_node_transcript_chars: int = DEFAULT_MAX_MODEL_VISIBLE_NODE_TRANSCRIPT_CHARS,
         max_model_visible_list_items: int = DEFAULT_MAX_MODEL_VISIBLE_LIST_ITEMS,
         downstream_reservations: dict[str, int] | None = None,
         initial_usage: dict[str, Any] | None = None,
@@ -348,6 +351,7 @@ class AppWorldController:
         self.max_output_tokens = max_output_tokens
         self.max_model_visible_tool_chars = max(1, int(max_model_visible_tool_chars))
         self.max_model_visible_evidence_chars = max(1, int(max_model_visible_evidence_chars))
+        self.max_model_visible_node_transcript_chars = max(1, int(max_model_visible_node_transcript_chars))
         self.max_model_visible_list_items = max(1, int(max_model_visible_list_items))
         self.downstream_reservations = {
             str(name): max(0, int(value))
@@ -430,27 +434,46 @@ class AppWorldController:
         marker = "Return exactly one JSON object, with no markdown or surrounding prose."
         return prompt.split(marker, 1)[0].rstrip()
 
-    def _project_phase_messages(
+    def _bounded_node_local_messages(
         self,
-        *,
-        base_messages: list[dict[str, Any]],
-        evidence: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Build a phase-local context instead of replaying raw chat history."""
+        turns: list[list[dict[str, Any]]],
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        """Retain newest complete local turns without orphaning tool-call IDs.
 
-        if not evidence:
-            return list(base_messages)
-        rendered = json.dumps(evidence, ensure_ascii=False, sort_keys=True)
-        if len(rendered) > self.max_model_visible_evidence_chars:
-            rendered = rendered[-self.max_model_visible_evidence_chars :]
-            rendered = "[TRUNCATED_EVIDENCE: retained tail]\n" + rendered
-        return [
-            *base_messages,
-            {
-                "role": "user",
-                "content": "DETERMINISTIC NODE EVIDENCE (not a full conversation history):\n" + rendered,
-            },
+        A turn is an assistant message and all of its matching tool-result
+        messages.  We deliberately drop only whole turns: trimming individual
+        messages would break the provider's required
+        ``assistant(tool_calls) -> tool(tool_call_id)`` continuation.
+        """
+
+        retained_indices: set[int] = set()
+        retained_chars = 0
+        # Tool turns are protocol-critical: keep their complete continuation
+        # pairs before optional plain assistant reasoning turns.
+        ordered_indices = [
+            *reversed([index for index, turn in enumerate(turns) if any(message.get("tool_calls") for message in turn)]),
+            *reversed([index for index, turn in enumerate(turns) if not any(message.get("tool_calls") for message in turn)]),
         ]
+        for index in ordered_indices:
+            turn = turns[index]
+            turn_chars = len(json.dumps(turn, ensure_ascii=False))
+            if retained_indices and retained_chars + turn_chars > self.max_model_visible_node_transcript_chars:
+                continue
+            # Keep a newest oversized complete turn rather than splitting its
+            # tool-call pair. Tool observations inside it remain independently
+            # bounded by _project_tool_output.
+            retained_indices.add(index)
+            retained_chars += turn_chars
+        retained = [turn for index, turn in enumerate(turns) if index in retained_indices]
+        return (
+            [message for turn in retained for message in turn],
+            {
+                "total_turns": len(turns),
+                "retained_turns": len(retained),
+                "dropped_turns": len(turns) - len(retained),
+                "retained_chars": retained_chars,
+            },
+        )
 
     def _reservation_for(self, phase: str, *, finalization: bool) -> int:
         if finalization:
@@ -547,6 +570,8 @@ class AppWorldController:
             self.ledger.after_tool_call()
         batch_record = {
             "code": validation.code,
+            "full_output": raw_output,
+            "model_visible_output": visible_output,
             "api_names_static": list(validation.api_names),
             "api_calls_observed": len(calls),
             "write_calls_observed": sum(1 for call in calls if self._is_write(call.name)),
@@ -762,15 +787,23 @@ class AppWorldController:
             started_at=time.clock_gettime(time.CLOCK_REALTIME),
         )
         self._emit_event("STAGE_START", phase=phase)
+        # This is the only cross-node context. It carries the declared node
+        # objective, structured upstream handoffs, tool policy, and contract;
+        # it never carries a prior node's raw transcript.
         base_messages: list[dict[str, Any]] = [
             {"role": "system", "content": "You are a bounded AppWorld experiment agent. Never use hidden ground truth."},
+            {"role": "user", "content": prompt},
+        ]
+        finalization_base_messages = [
+            base_messages[0],
             {"role": "user", "content": self._node_objective(prompt)},
         ]
-        evidence: list[dict[str, Any]] = []
+        node_local_turns: list[list[dict[str, Any]]] = []
         trace.context_projection = {
-            "mode": "deterministic_phase_local_v1",
+            "mode": "deterministic_cross_node_projection_node_local_transcript_v2",
             "max_model_visible_tool_chars": self.max_model_visible_tool_chars,
             "max_model_visible_evidence_chars": self.max_model_visible_evidence_chars,
+            "max_model_visible_node_transcript_chars": self.max_model_visible_node_transcript_chars,
             "max_model_visible_list_items": self.max_model_visible_list_items,
         }
         try:
@@ -780,7 +813,7 @@ class AppWorldController:
             if contract is not None and not tools:
                 artifact = self._finalize_artifact(
                     phase=phase,
-                    messages=self._project_phase_messages(base_messages=base_messages, evidence=evidence),
+                    messages=finalization_base_messages,
                     contract=contract,
                     trace=trace,
                     allow_contract_retry=allow_contract_retry,
@@ -790,12 +823,35 @@ class AppWorldController:
                 self._emit_event("STAGE_END", phase=phase, status=trace.status)
                 return trace, artifact
             while True:
-                request_messages = self._project_phase_messages(base_messages=base_messages, evidence=evidence)
+                node_local_messages, projection = self._bounded_node_local_messages(node_local_turns)
+                trace.context_projection.update(projection)
+                request_messages = [*base_messages, *node_local_messages]
                 content, tool_calls = self._call_model(
                     phase=phase, messages=request_messages, tools=tools, trace=trace
                 )
                 if tool_calls:
                     allowed_names = {item["function"]["name"] for item in tools}
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": content or None,
+                        "tool_calls": [
+                            {
+                                "id": str(call.get("id") or f"{phase}-{len(trace.tool_calls)}-{index}"),
+                                "type": "function",
+                                "function": {
+                                    "name": str(call.get("name", "")),
+                                    "arguments": (
+                                        call.get("arguments", "{}")
+                                        if isinstance(call.get("arguments", "{}"), str)
+                                        else json.dumps(call.get("arguments", {}), ensure_ascii=False)
+                                    ),
+                                },
+                            }
+                            for index, call in enumerate(tool_calls)
+                        ],
+                    }
+                    trace.node_transcript.append(assistant_message)
+                    local_turn = [assistant_message]
                     for index, call in enumerate(tool_calls):
                         name = str(call.get("name", ""))
                         call_id = str(call.get("id") or f"{phase}-{len(trace.tool_calls)}-{index}")
@@ -818,7 +874,13 @@ class AppWorldController:
                                 trace.tool_calls.extend(records)
                                 self._emit_event("TOOL_CALL", phase=phase, name=CODE_EXECUTOR_NAME, count=len(records))
                                 visible, metadata = self._project_tool_output(output)
-                                evidence.append({"tool": name, "success": ok, "output": visible, **metadata})
+                                local_turn.append({"role": "tool", "tool_call_id": call_id, "content": visible})
+                                trace.node_transcript.append({
+                                    "role": "tool", "tool_call_id": call_id, "content": output,
+                                    "model_visible_content": visible, "truncation": metadata,
+                                })
+                                batch_record = trace.code_batches[-1]
+                                batch_record["model_visible_metadata"] = metadata
                                 continue
                             if name not in allowed_names:
                                 self.ledger.safety_incidents += 1
@@ -844,11 +906,24 @@ class AppWorldController:
                             output = f"Tool execution failed: {exc}"
                             ok = False
                             self.ledger.record_error(tool=True)
-                        record = {"name": name, "arguments": arguments, "output": output, "success": ok}
+                        record = {
+                            "name": name,
+                            "tool_call_id": call_id,
+                            "arguments": arguments,
+                            "output": output,
+                            "success": ok,
+                        }
                         trace.tool_calls.append(record)
                         self._emit_event("TOOL_CALL", phase=phase, name=name, success=ok)
                         visible, metadata = self._project_tool_output(output)
-                        evidence.append({"tool": name, "success": ok, "output": visible, **metadata})
+                        record["model_visible_output"] = visible
+                        record["model_visible_metadata"] = metadata
+                        local_turn.append({"role": "tool", "tool_call_id": call_id, "content": visible})
+                        trace.node_transcript.append({
+                            "role": "tool", "tool_call_id": call_id, "content": output,
+                            "model_visible_content": visible, "truncation": metadata,
+                        })
+                    node_local_turns.append(local_turn)
                     continue
 
                 if contract is None:
@@ -867,11 +942,13 @@ class AppWorldController:
                         "provider_protocol_mismatch: unstructured DSML-like tool markup ended the tool phase"
                     )
                 if content:
-                    visible, metadata = self._project_tool_output(content)
-                    evidence.append({"assistant_content": visible, **metadata})
+                    node_local_turns.append([{"role": "assistant", "content": content}])
+                    trace.node_transcript.append({"role": "assistant", "content": content})
+                node_local_messages, projection = self._bounded_node_local_messages(node_local_turns)
+                trace.context_projection.update(projection)
                 artifact = self._finalize_artifact(
                     phase=phase,
-                    messages=self._project_phase_messages(base_messages=base_messages, evidence=evidence),
+                    messages=[*finalization_base_messages, *node_local_messages],
                     contract=contract,
                     trace=trace,
                     allow_contract_retry=allow_contract_retry,

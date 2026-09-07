@@ -20,7 +20,7 @@ from adapters.appworld_code_executor import (
     instrument_batch_code,
     validate_batch_code,
 )
-from adapters.appworld_contracts import SCHEMA_VERSION, PlannerArtifact, VerifierArtifact, validate_artifact
+from adapters.appworld_contracts import ExecutorArtifact, SCHEMA_VERSION, PlannerArtifact, VerifierArtifact, validate_artifact
 from adapters.appworld_experiment import AppWorldExperimentRunner, default_world_factory, validate_experiment_config, validate_task_manifest
 from adapters.appworld_manifest import stratified_task_ids
 from adapters.appworld_dag import Intervention, registered_dags
@@ -336,6 +336,64 @@ class AppWorldContractTests(unittest.TestCase):
             self.assertEqual(controller.ledger.snapshot()["tool_calls"], 2)
             self.assertEqual(trace.code_batches[0]["api_calls_observed"], 2)
 
+    def test_node_local_tool_continuation_is_bounded_without_orphaning_call_ids(self):
+        """The next request and finalization retain one intact local tool turn."""
+
+        class LargeReadWorld(FakeWorld):
+            def execute(self, code: str) -> str:
+                if "fake__read" in code:
+                    return "R" * 200
+                return super().execute(code)
+
+        class ContinuationModel:
+            model_name = "continuation"
+
+            def __init__(self):
+                self.requests: list[list[dict]] = []
+                self.calls = 0
+
+            def complete(self, *, phase, messages, tools, max_output_tokens):
+                del phase, tools, max_output_tokens
+                self.requests.append(deepcopy(messages))
+                self.calls += 1
+                usage = {"prompt_tokens": 1, "completion_tokens": 1}
+                if self.calls == 1:
+                    return {"tool_calls": [{"id": "read-1", "name": "fake__read", "arguments": "{}"}], "usage": usage}
+                return {"content": json.dumps({
+                    "schema_version": SCHEMA_VERSION, "status": "COMPLETED",
+                    "executed_actions": [{"app": "fake", "api": "read", "arguments": {}, "observation": "read", "success": True}],
+                    "claimed_state_changes": [], "errors": [], "final_answer": None,
+                }), "usage": usage}
+
+        with tempfile.TemporaryDirectory() as directory:
+            model = ContinuationModel()
+            controller = AppWorldController(
+                world=LargeReadWorld(Path(directory) / "world"), model=model, limits=limits(),
+                trace_dir=Path(directory) / "trace", max_model_visible_tool_chars=20,
+                max_model_visible_node_transcript_chars=80,
+            )
+            trace, artifact = controller._run_phase(
+                "executor", "execute", controller._tools(["fake__read"], read_only=True), contract=ExecutorArtifact
+            )
+            self.assertEqual("completed", trace.status)
+            self.assertIsNotNone(artifact)
+            # Request 2 includes the normalized assistant tool call and its
+            # corresponding bounded tool result as one continuation pair.
+            continuation = model.requests[1]
+            assistant = next(message for message in continuation if message.get("role") == "assistant")
+            tool = next(message for message in continuation if message.get("role") == "tool")
+            self.assertEqual("read-1", assistant["tool_calls"][0]["id"])
+            self.assertEqual("read-1", tool["tool_call_id"])
+            self.assertIn("TRUNCATED", tool["content"])
+            # The terminal artifact call receives the same complete pair.
+            self.assertEqual("read-1", next(message for message in model.requests[2] if message.get("role") == "tool")["tool_call_id"])
+            record = trace.tool_calls[0]
+            self.assertEqual(200, len(record["output"]))
+            self.assertTrue(record["model_visible_metadata"]["truncated"])
+            transcript_tool = next(message for message in trace.node_transcript if message.get("role") == "tool")
+            self.assertEqual("read-1", transcript_tool["tool_call_id"])
+            self.assertEqual(200, len(transcript_tool["content"]))
+
     def test_strict_contract_rejects_markdown_and_missing_fields(self):
         artifact, errors = validate_artifact("```json\n{}\n```", PlannerArtifact)
         self.assertIsNone(artifact)
@@ -425,6 +483,10 @@ class AppWorldContractTests(unittest.TestCase):
             )
             self.assertNotIn("PLANNER ARTIFACT", verifier_context)
             self.assertIn("EXECUTOR ARTIFACT", verifier_context)
+            self.assertFalse(any(
+                message.get("role") == "tool" or message.get("tool_calls")
+                for message in model.messages_by_phase["verifier"]
+            ))
 
     def test_dsml_markup_is_not_executed_and_finalization_commits_verifier_artifact(self):
         with tempfile.TemporaryDirectory() as directory:

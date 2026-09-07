@@ -175,7 +175,12 @@ def validate_experiment_config(config: dict[str, Any], *, formal: bool) -> None:
     projection = config.get("context_projection", {})
     if projection and not isinstance(projection, dict):
         raise ValueError("context_projection must be an object")
-    for name in ("max_model_visible_tool_chars", "max_model_visible_evidence_chars", "max_model_visible_list_items"):
+    for name in (
+        "max_model_visible_tool_chars",
+        "max_model_visible_evidence_chars",
+        "max_model_visible_node_transcript_chars",
+        "max_model_visible_list_items",
+    ):
         if name in projection and int(projection[name]) <= 0:
             raise ValueError(f"context_projection.{name} must be positive")
     reservations = config["budget"].get("downstream_reservations", {})
@@ -612,6 +617,9 @@ class AppWorldExperimentRunner:
             max_model_visible_evidence_chars=int(
                 self.config.get("context_projection", {}).get("max_model_visible_evidence_chars", 12_000)
             ),
+            max_model_visible_node_transcript_chars=int(
+                self.config.get("context_projection", {}).get("max_model_visible_node_transcript_chars", 12_000)
+            ),
             max_model_visible_list_items=int(
                 self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)
             ),
@@ -746,6 +754,9 @@ class AppWorldExperimentRunner:
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
             max_model_visible_tool_chars=int(self.config.get("context_projection", {}).get("max_model_visible_tool_chars", 6_000)),
             max_model_visible_evidence_chars=int(self.config.get("context_projection", {}).get("max_model_visible_evidence_chars", 12_000)),
+            max_model_visible_node_transcript_chars=int(
+                self.config.get("context_projection", {}).get("max_model_visible_node_transcript_chars", 12_000)
+            ),
             max_model_visible_list_items=int(self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)),
             downstream_reservations=dict(self.config["budget"].get("downstream_reservations", {})),
             require_token_usage=self.formal,
@@ -864,6 +875,9 @@ class AppWorldExperimentRunner:
             max_output_tokens=int(self.config["model"]["max_output_tokens_per_call"]),
             max_model_visible_tool_chars=int(self.config.get("context_projection", {}).get("max_model_visible_tool_chars", 6_000)),
             max_model_visible_evidence_chars=int(self.config.get("context_projection", {}).get("max_model_visible_evidence_chars", 12_000)),
+            max_model_visible_node_transcript_chars=int(
+                self.config.get("context_projection", {}).get("max_model_visible_node_transcript_chars", 12_000)
+            ),
             max_model_visible_list_items=int(self.config.get("context_projection", {}).get("max_model_visible_list_items", 8)),
             downstream_reservations=dict(self.config["budget"].get("downstream_reservations", {})),
             require_token_usage=self.formal,
