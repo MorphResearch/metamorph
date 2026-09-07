@@ -142,6 +142,27 @@ def continuation_trials(adapter: Any, model: str, repeats: int) -> list[dict[str
     return rows
 
 
+def write_failure_audit(output_dir: Path, model: str, stage: str, exc: Exception) -> None:
+    """Persist provider failures instead of leaving an ambiguous empty root."""
+
+    payload = {
+        "schema_version": "glm-provider-compatibility.v1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "provider": "Z.AI", "model": model, "phase_1_pass": False,
+        "failure_stage": stage, "failure_type": type(exc).__name__, "failure": str(exc),
+    }
+    (output_dir / "results.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / "GLM47_PROVIDER_COMPATIBILITY_AUDIT.md").write_text(
+        "# GLM-5.3 Provider Compatibility Audit\n\n"
+        "- Phase 1 pass: **False**\n"
+        f"- Failure stage: `{stage}`\n"
+        f"- Failure type: `{type(exc).__name__}`\n"
+        f"- Failure: `{exc}`\n\n"
+        "No AppWorld task was called.\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="glm-5.3")
@@ -154,26 +175,30 @@ def main() -> None:
         raise FileExistsError(f"refusing to overwrite provider validation output: {args.output_dir}")
     args.output_dir.mkdir(parents=True)
 
-    bundle = build_client("glm", args.model, "https://api.z.ai/api/paas/v4/", "ZAI_API_KEY")
-    adapter = bundle.adapter
-    assert adapter is not None
-
-    verifier_rows = artifact_trials(
-        adapter, args.model, VerifierArtifact,
-        "Evidence: the requested state was observed and matches the criterion. Return VERIFIED with one passing check.",
-        args.repeats,
-    )
-    executor_rows = artifact_trials(
-        adapter, args.model, ExecutorArtifact,
-        "Evidence: fake lookup returned alpha-record. Return COMPLETED with one successful lookup action.",
-        args.repeats,
-    )
-    continuation_rows = continuation_trials(adapter, args.model, args.repeats)
-    not_verified_rows = artifact_trials(
-        adapter, args.model, VerifierArtifact,
-        "Evidence is insufficient to prove task success. Return NOT_VERIFIED with concrete non-empty repair_instructions.",
-        args.repeats,
-    )
+    try:
+        bundle = build_client("glm", args.model, "https://api.z.ai/api/paas/v4/", "ZAI_API_KEY")
+        adapter = bundle.adapter
+        assert adapter is not None
+        verifier_rows = artifact_trials(
+            adapter, args.model, VerifierArtifact,
+            "Evidence: the requested state was observed and matches the criterion. Return VERIFIED with one passing check.",
+            args.repeats,
+        )
+        executor_rows = artifact_trials(
+            adapter, args.model, ExecutorArtifact,
+            "Evidence: fake lookup returned alpha-record. Return COMPLETED with one successful lookup action.",
+            args.repeats,
+        )
+        continuation_rows = continuation_trials(adapter, args.model, args.repeats)
+        not_verified_rows = artifact_trials(
+            adapter, args.model, VerifierArtifact,
+            "Evidence is insufficient to prove task success. Return NOT_VERIFIED with concrete non-empty repair_instructions.",
+            args.repeats,
+        )
+    except Exception as exc:  # A provider error is an explicit compatibility failure.
+        write_failure_audit(args.output_dir, args.model, "phase_1_provider_call", exc)
+        print(json.dumps({"phase_1_pass": False, "output_dir": str(args.output_dir), "error": type(exc).__name__}, indent=2))
+        return
     for row in not_verified_rows:
         row["not_verified_valid"] = row.get("artifact_status") == "NOT_VERIFIED" and row.get("schema_valid")
 
