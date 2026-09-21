@@ -1,5 +1,7 @@
 # 下一对话执行清单
 
+> 历史清单（2026-09-06），不再作为当前执行入口。后续已冻结 P1 dev manifest/config，但 G3 repair 与协议可靠性门槛仍未通过，P1 未启动。请先阅读 [截至 2026-09-14 的实验总览](EXPERIMENT_HISTORY.md) 和 [v3 停止记录](BOUNDED_NODE_EXECUTION_V3_VALIDATION.md)；下文保留用于追溯当时决策。
+
 ## 当前状态（2026-09-06）
 
 - 分支：`master`，工作树在交接时应保持干净。

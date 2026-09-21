@@ -3,7 +3,7 @@ Gate-1,6bdbc26_1,simple,G0,300,dag_p1_formal_orchestrated_v2_20260906,completed,
 Gate-1,6bdbc26_1,simple,G1,300,dag_p1_formal_orchestrated_v2_20260906,completed,true,true,true,false,engineering_smoke_only,c88d6af
 Gate-1,6bdbc26_1,simple,G2,300,dag_p1_formal_orchestrated_v2_20260906,completed,true,true,true,false,engineering_smoke_only,c88d6af
 Gate-1,6bdbc26_1,simple,G3,300,dag_p1_formal_orchestrated_v2_20260906,completed,true,true,true,false,engineering_smoke_only;conditional_skip_path_only,c88d6af
-Gate-1,6bdbc26_1,simple,G2,300,dag_p1_formal_orchestrated_20260906,failed,false,false,false,runner_state_file_race,c7c0a74
+Gate-1,6bdbc26_1,simple,G2,300,dag_p1_formal_orchestrated_20260906,failed,false,false,false,false,runner_state_file_race,c7c0a74
 Gate-1,4fab96f_1,complex,G3,300,dag_p1_formal_orchestrated_v2_20260906,completed,false,false,true,false,engineering_smoke_only;model_contract_failure_no_repair_trigger,c88d6af
 Gate-1,3ab5b8b_1,medium,G3,300,dag_p1_formal_orchestrated_v2_20260906,completed,false,false,true,false,engineering_smoke_only;model_contract_failure_no_repair_trigger,c88d6af
 Gate-1,530b157_3,complex,G3,300,dag_p1_formal_orchestrated_v2_20260906,completed,false,false,true,false,engineering_smoke_only;model_contract_failure_no_repair_trigger,c88d6af

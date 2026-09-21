@@ -1,0 +1,25 @@
+{
+  "schema_version": "day1-dev-v1",
+  "environment": {
+    "kind": "local_fixture",
+    "name": "synthetic metered SQLite fixture",
+    "public_benchmark_connected": false,
+    "included_in_primary_analysis": false
+  },
+  "tasks": [
+    {
+      "id": "local_fixture_practice_region_cluster",
+      "phase": "practice",
+      "status": "engineering_smoke_only",
+      "answer_or_reference_query_exposed_to_agent": false
+    },
+    {
+      "id": "local_fixture_probe_region_aggregate",
+      "phase": "probe",
+      "status": "engineering_smoke_only",
+      "answer_or_reference_query_exposed_to_agent": false
+    }
+  ],
+  "formal_manifest": "PENDING_PUBLIC_ENVIRONMENT_AND_PROTOCOL_FREEZE"
+}
+

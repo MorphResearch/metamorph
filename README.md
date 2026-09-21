@@ -3,6 +3,10 @@
 一个本地运行、可联网检索并具备跨会话记忆的**通用智能体**（General-purpose Agent）。
 架构参考 scilink-agent 的分层设计，但业务逻辑保持通用，不绑定任何垂直领域。
 
+## 实验与研究记录
+
+研究进展统一见 [实验脉络与当前状态](docs/zh-CN/EXPERIMENT_HISTORY.md)，原始证据入口见 [实验产物盘点](docs/zh-CN/experiment_audit/README.md)。截至 2026-09-15，AppWorld DAG 主线停在协议验证门槛，正式 P1/P2/P3 尚未完成；上下文边界实验仍是草案。下文介绍通用运行系统，不能替代实验有效性结论。
+
 ## 架构
 
 Metamorph 当前是一个本地 API-first Agent 系统：浏览器只调用本地后端，模型 API Key 始终留在后端进程中。任务可以选择单 Agent 或基于任务形态自动设计的多 Agent 流程。

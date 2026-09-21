@@ -1,0 +1,92 @@
+study:
+  id: metamorph_experience_value
+  version: '0.1'
+  date: '2026-09-21'
+  status: draft_not_preregistered
+  objective: execution_structure_and_transferable_experience
+  paid_batch_authorized: false
+  controller_changes_out_of_scope: true
+  train_backbone: false
+  claim_rsi: false
+
+primary_analysis:
+  experiment: E2
+  contrast: receiver_M_U_minus_receiver_M_F
+  score: environment_native_reward
+  two_sided: true
+  report_accuracy_and_all_costs_separately: true
+  independent_unit: learning_replicate_nested_in_environment
+  minimum_meaningful_effect: null
+  sample_size_justification: null
+
+conditions:
+  F0: {workflow: prescribed, retain_between_tasks: false}
+  U0: {workflow: agent_organized, retain_between_tasks: false}
+  F1: {workflow: prescribed, retain_between_tasks: true}
+  U1: {workflow: agent_organized, retain_between_tasks: true}
+  fixed_workflow_implementation: null
+  common_receiver_prompt_hash: null
+  fixed_prompt_hash: null
+  autonomous_prompt_hash: null
+
+model:
+  provider: null
+  exact_model_id: null
+  request_config: null
+  silent_fallback: false
+
+budget:
+  currency: CNY
+  project_hard_cap: null
+  pilot_hard_cap: null
+  per_episode_token_cap: null
+  per_episode_tool_cap: null
+  per_learning_stream_cap: null
+  memory_storage_cap_bytes: null
+  consolidation_cap: null
+  request_retry_policy: null
+  charge_failures_and_retries: true
+  meter_underlying_tool_operations: true
+
+isolation:
+  fresh_chat_each_task: true
+  memory_path: /memory
+  scratch_path: /work
+  agent_can_read_research_logs: false
+  agent_can_read_hidden_evaluator: false
+  agent_can_access_real_accounts: false
+  probe_clone_per_task: true
+  probe_writeback: false
+  no_retention_archives_hidden_from_agent: true
+
+data:
+  development_manifest: null
+  mechanism_probe_manifest: null
+  confirmation_manifest: null
+  environment_commit: null
+  evaluator_commit: null
+  adapted_from_official_schedule: null
+  preserve_schema_drift_boundaries: true
+  duplicate_and_template_overlap_audited: false
+
+pilot_planning_only:
+  E1:
+    paired_learning_replicates: 2
+    conditions: 4
+    practice_instances: 3
+    frozen_probe_instances: 3
+    estimated_episode_count: 48
+  E2:
+    paired_sources: 2
+    memory_conditions: [EMPTY, M_F, M_U, RAW_F, RAW_U]
+    frozen_probe_instances: 3
+    estimated_episode_count: 30
+
+publication:
+  target: AAMAS_2027_Main_GAAI
+  findings_opt_out: false
+  internal_abstract_date: '2026-09-30'
+  internal_full_paper_date: '2026-10-07'
+  official_abstract_date_AoE: '2026-10-01'
+  official_full_paper_date_AoE: '2026-10-08'
+  ai_assistance_record_required: true

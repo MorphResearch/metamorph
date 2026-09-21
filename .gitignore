@@ -23,6 +23,7 @@ benchmarks/tau3-bench/
 benchmarks/workbench/
 benchmarks/*.tar.gz
 experiments/appworld/runs/
+artifacts/experience_value/
 
 # Secrets / local data
 .env

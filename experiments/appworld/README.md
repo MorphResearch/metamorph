@@ -1,5 +1,7 @@
 # AppWorld：可审计 DAG workflow 实验
 
+> 状态更新（2026-09-15）：以下顺序是历史协议流程，当前停在 Gate-1/协议可靠性验证，不能据此直接启动 P1。P1 dev 清单已冻结，但真实 G3 repair 证据仍缺失，bounded-node v3 与后续 GLM 微测试均未通过进入门槛。完整时间线和证据见 [实验总览](../../docs/zh-CN/EXPERIMENT_HISTORY.md) 与 [v3 停止记录](../../docs/zh-CN/BOUNDED_NODE_EXECUTION_V3_VALIDATION.md)。
+
 研究对象是 task-internal DAG，而不是固定控制平面的角色存在与否。控制平面固定为 `planner / DAG compiler → DAG executor → final evaluator`；实验比较的四个预注册图是 G0–G3。
 
 完整协议见 [研究计划](../../docs/zh-CN/CAUSAL_WORKFLOW_RESEARCH_PLAN.md)，一周交付门槛见 [投稿前清单](../../docs/zh-CN/ONE_WEEK_PUBLICATION_CHECKLIST.md)。

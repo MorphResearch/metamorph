@@ -1,0 +1,43 @@
+# Development-local mirror of the provided protocol draft. The authoritative
+# reference remains ../../Metamorph_Day1_Codex_Guide_20260921/docs/experience_value/reference/protocol_v0.1.yaml.
+study:
+  experiment_id: metamorph-experience-value-v0.1
+  status: development_only
+  paid_batch_authorized: false
+  primary_analysis_includes_local_fixture: false
+conditions:
+  F0: {workflow: prompt_prescribed_v0, retain_between_tasks: false}
+  U0: {workflow: agent_organized, retain_between_tasks: false}
+  F1: {workflow: prompt_prescribed_v0, retain_between_tasks: true}
+  U1: {workflow: agent_organized, retain_between_tasks: true}
+  fixed_workflow_implementation: prompt_prescribed_v0
+model:
+  provider: null
+  exact_model_id: null
+  request_config: null
+  silent_fallback: false
+budget:
+  currency: CNY
+  project_hard_cap: null
+  pilot_hard_cap: null
+  per_episode_token_cap: null
+  per_episode_tool_cap: null
+  request_retry_policy: null
+  charge_failures_and_retries: true
+  meter_underlying_tool_operations: true
+isolation:
+  fresh_chat_each_task: true
+  memory_path: /memory
+  scratch_path: /work
+  agent_can_read_research_logs: false
+  agent_can_read_hidden_evaluator: false
+  agent_can_access_real_accounts: false
+  probe_clone_per_task: true
+  probe_writeback: false
+  code_execution_isolation: BLOCKED
+development_environment:
+  kind: local_fixture
+  task_prefix: local_fixture_
+  evaluator_kind: engineering_smoke
+  included_in_primary_analysis: false
+
