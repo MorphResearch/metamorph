@@ -1,0 +1,51 @@
+{
+  "status": "CONSUMED_STOPPED_AFTER_16_ATTEMPTED_15_COMPLETED_PROVIDER_REQUESTS_INFRA_FAILURE",
+  "authorization_id": "public_database_exploration_calibration_revision_v2_20260926T140010Z_independent",
+  "authorization_source": "user confirmation on 2026-09-26 for one independently authorized revision-v2 batch; no reuse of Atomic, provider smoke, or any consumed public calibration authorization",
+  "authorized_at": "2026-09-26T22:00:10+08:00",
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/public_calibration.revision_v2.pending.json",
+    "sha256": "a32963d29d401c88e89a4cef8a0b10592777e57668f100eb5fc3b96200df2a00"
+  },
+  "frozen_task_manifest": {
+    "path": "experiments/experience_value/public_calibration.tasks.md",
+    "sha256": "be6cb33cfa743d2bad98de52613b9c66e3411b2093c709598ed4fae9474c1b6a"
+  },
+  "entry_code": {
+    "path": "experiments/experience_value/public_calibration_run.py",
+    "sha256": "7760e067dac1e62be3b27787aa879fac357ca14f535c7d769857180402551d6a"
+  },
+  "code_dependencies": {
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "live_bridge": "203bf0b14534c9f4a31db3a892d994126da9a2cef56a70b7b476d720648dfe2f",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "workspace": "d2998154c834c061367dc2d32def386e6de85d84f5d6f63d3bf2dc7d9646f10f",
+    "records": "93a439ae288582dbc276f9bd48c54d1c8a67a50d79c7a5a2b25e5ae79b96ddb2",
+    "loop": "ac176d542ae92f721fd1fc3236bd058103845b1f30e4df969356d4e6c55bf897",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1"
+  },
+  "study_kind": "development_public_calibration",
+  "included_in_primary_analysis": false,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "max_episodes": 6,
+  "max_provider_requests": 144,
+  "hard_cap_usd": "5.00",
+  "offpeak_window": {
+    "timezone": "Asia/Shanghai",
+    "start_local": "18:05:00",
+    "end_local": "08:55:00"
+  },
+  "preflight": {
+    "required_before_provider_client": true,
+    "operations": ["DNS api.deepseek.com", "verified TLS api.deepseek.com:443", "credential-free HEAD /"]
+  },
+  "live_requests_authorized": true,
+  "real_model_requests_sent_under_this_authorization": 16,
+  "paid_evaluator_requests_sent_under_this_authorization": 0,
+  "formal_78_episode_batch_authorized": false,
+  "consumed_at": "2026-09-26T22:03:56+08:00",
+  "consumption_run_id": "e0-29cffaa38a01474891c27b43644ae20b",
+  "consumption_stop_reason": "APITimeoutError/ReadTimeout before a provider response in dev-1-u0 request 9; the response has no usage and remains billing_unknown. Per the frozen batch policy this is INFRA_FAILURE and stops all remaining episodes without retry."
+}

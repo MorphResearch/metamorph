@@ -1,0 +1,26 @@
+{
+  "status": "AUTHORIZED_FOR_EXACT_TWO_ATOMIC_FILE_IO_EPISODES",
+  "authorization_id": "atomic_file_io_control_20260921T123757Z",
+  "authorization_source": "user message: 我确认并授权执行一次 atomic_file_io_control 真实批次",
+  "authorized_at_utc": "2026-09-21T12:37:57Z",
+  "authorization_is_independent": true,
+  "does_not_reuse_prior_authorization_or_unspent_budget": true,
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/atomic_file_io_control.pending.json",
+    "sha256": "acc2de068fbbc6270c44bf837a71a4963b28381b9f537b1b03a31785bd269869"
+  },
+  "frozen_task_manifest": {
+    "path": "experiments/experience_value/atomic_file_io_control.tasks.md",
+    "sha256": "55681dc1c8aa66d45c4926eb6932862edf96315d943b240f7a264209044fe6bd"
+  },
+  "study_kind": "engineering_atomic_file_io_control",
+  "included_in_primary_analysis": false,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "max_episodes": 2,
+  "max_provider_requests": 12,
+  "hard_cap_usd": "0.20",
+  "live_requests_authorized": true,
+  "real_model_requests_sent_under_this_authorization": 0,
+  "formal_48_plus_30_batch_authorized": false
+}

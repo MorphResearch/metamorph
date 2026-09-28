@@ -1,0 +1,71 @@
+{
+  "status": "PENDING_FORMAL_SOURCE_BLOCK_02_USER_SIGNOFF_NO_LIVE_CALLS",
+  "live_requests_authorized": false,
+  "real_model_requests_sent_under_this_authorization": 0,
+  "study_kind": "formal_source_v1",
+  "included_in_primary_analysis": true,
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/formal_source_block_02.pending.json",
+    "sha256": "4c920437d8135d0efb836c6127732d56b376ea79b3f2aebf2b48d0580aaf396b"
+  },
+  "entry_code": {
+    "path": "experiments/experience_value/formal_source_run_v2.py",
+    "sha256": "c3625f2ebf148de45e42facd2aa36f5bd537d6f505360ae93eb9f9a097a7efa9"
+  },
+  "code_dependencies": {
+    "entry": "c3625f2ebf148de45e42facd2aa36f5bd537d6f505360ae93eb9f9a097a7efa9",
+    "ledger": "5232ca863350de999752142ba878d91b579104f5fc262da2da7757c32d8de238",
+    "live_bridge": "0573543a1b24f568e918c9e8fcf9cc54ff361af927c299383147efd79f4858dc",
+    "loop": "220718303d4c570e373e108befa908f3978212650de393494193be58595fc5f0",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1",
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "public_calibration_bridge": "e511df297fc8d6638fa2fcbb5d67f20409bf1c8603350c665ada6d803236c4f1",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "workspace": "8c46ac35f5b17acf0b1965604feda4933ea1a832112588d5c9b99fcbdee0f82b"
+  },
+  "formal_protocol": {
+    "path": "FORMAL_EXPERIMENT_PROTOCOL_V1.md",
+    "sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450",
+    "scientific_diff": "NONE"
+  },
+  "source_manifest": {
+    "path": "FORMAL_SOURCE_MANIFEST_V1.json",
+    "sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e"
+  },
+  "block_definition": {
+    "path": "FORMAL_SOURCE_BLOCKS_V1.json",
+    "sha256": "c54f6efabffad684c9612833a3151f6a2d60bec21dd75735ec394235fd24949a",
+    "block_id": "formal_source_block_02",
+    "allowed_manifest_positions": [5, 6, 7, 8],
+    "allowed_tokens": ["t08-U0", "t08-F1", "t08-U1", "t08-F0"],
+    "next_position_not_authorized": 9
+  },
+  "required_predecessors": {
+    "formal-t08-f1": {
+      "run_id": "e0-e808a2e0f18a4eccad1e69f0d5d70f9c",
+      "snapshot_id": "snapshot-c2e5d0df8d7f45bdb43d27f7ffb9f995",
+      "snapshot_hash": "03ab30c4097013cfbce46885ed186477643277f4be8594df565e839ff5ed1585",
+      "artifact_sha256": "56ef6d03541168dd9eda2a02820fbc788ff2477ad187df1e07540c383f61ff71"
+    },
+    "formal-t08-u1": {
+      "run_id": "e0-e808a2e0f18a4eccad1e69f0d5d70f9c",
+      "snapshot_id": "snapshot-d0eb99e062e14024bcdc0dc7c9d4aeee",
+      "snapshot_hash": "8fbfae0b2934f62f41499c1a223fec97b724d9c58ac11acbe008f304ab4abf57",
+      "artifact_sha256": "c19b252e079de0ece47d38a3009755533cf4d10d49b5b6a3481f9b7d0436896f"
+    }
+  },
+  "hard_cap_usd": "7.00",
+  "not_authorized": [
+    "manifest position 9 or later",
+    "remaining 24 source episodes",
+    "formal receiver",
+    "calibration",
+    "viability",
+    "smoke requests"
+  ],
+  "development_exclusion": {
+    "development_objects_may_mount": false,
+    "task_ids": [1, 2, 3, 4, 5, 6]
+  }
+}

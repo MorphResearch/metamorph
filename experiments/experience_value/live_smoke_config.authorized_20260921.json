@@ -1,0 +1,64 @@
+{
+  "status": "AUTHORIZED_FOR_EXACT_THREE_EPISODES",
+  "authorization_note": "User authorized only the fixed three local_fixture engineering_smoke episodes on 2026-09-21; no formal batch is authorized.",
+  "study_kind": "engineering_smoke",
+  "included_in_primary_analysis": false,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env_name_only": "DEEPSEEK_API_KEY",
+  "request": {
+    "thinking_enabled": true,
+    "reasoning_effort": "low",
+    "temperature": null,
+    "max_input_characters": 20480,
+    "max_input_tokens_per_request": 5120,
+    "max_output_tokens_per_request": 512,
+    "timeout_seconds": 30,
+    "automatic_retries": 0,
+    "sdk_implicit_retries": 0,
+    "max_provider_requests_per_episode": 6,
+    "max_tool_calls_per_episode": 6,
+    "tool_choice": "provider_default_auto_no_explicit_field"
+  },
+  "scope": {
+    "environment": "local_fixture",
+    "allowed_tools": ["read_file", "write_file", "query_sql"],
+    "forbidden_capabilities": ["python", "bash", "shell", "eval", "import", "arbitrary_code", "web"],
+    "code_files_are_static_artifacts": true,
+    "real_accounts_hidden_evaluators_research_logs_and_secret_files_inaccessible": true
+  },
+  "episodes": [
+    {"order": 1, "id": "local_fixture_u1_practice_region_cluster", "condition": "U1", "memory": "EMPTY", "role": "source"},
+    {"order": 2, "id": "local_fixture_estimate_coastal_mean", "condition": "E*", "memory": "M_U", "role": "probe"},
+    {"order": 3, "id": "local_fixture_estimate_coastal_mean", "condition": "E*", "memory": "EMPTY", "role": "probe"}
+  ],
+  "budget": {
+    "currency": "USD",
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "price_checked_on": "2026-09-21",
+    "price_basis": "DeepSeek-V4-Pro peak cache-miss input plus peak output; all requests reserve the full input and output limits before send, with cache treated as miss.",
+    "input_cache_miss_usd_per_million": "1.32",
+    "output_usd_per_million": "3.96",
+    "worst_case_per_request_usd": "0.00878592",
+    "worst_case_all_18_requests_usd": "0.15814656",
+    "unallocated_hard_cap_margin_usd": "0.04185344"
+  },
+  "authorization": {
+    "authorized": true,
+    "currency": "USD",
+    "hard_cap_usd": "0.20",
+    "max_provider_requests": 18,
+    "max_episodes": 3,
+    "price_basis": "2026-09-21 official DeepSeek peak price checked before this run",
+    "real_model_requests_sent_at_authorization": 0,
+    "formal_48_plus_30_batch_authorized": false
+  },
+  "stop_rules": {
+    "early_completion": "stop current episode immediately",
+    "budget_request_tool_or_timeout_limit": "stop at actual reason",
+    "unknown_billing_or_protocol_violation_or_snapshot_pollution": "stop all remaining episodes",
+    "normal_task_error_or_empty_artifact_or_no_memory_read": "record without retry or replacement",
+    "fourth_episode": "forbidden"
+  }
+}

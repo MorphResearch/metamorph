@@ -1,0 +1,12 @@
+{
+  "status": "PENDING_FORMAL_EXPERIMENT_V1_USER_SIGNOFF_NO_LIVE_CALLS",
+  "live_requests_authorized": false,
+  "real_model_requests_sent_under_this_authorization": 0,
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/public_formal_experiment_v1.pending.json",
+    "sha256": "8a6f3664c8668b73f976d290afe101e1e6de17662f0e3e6def04900e776c221c"
+  },
+  "source_manifest": {"path": "FORMAL_SOURCE_MANIFEST_V1.json", "sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e"},
+  "receiver_manifest": {"path": "FORMAL_RECEIVER_MANIFEST_V1.json", "sha256": "6a6ed3b22aebc5b0bace7bd06c73c54892f3d6e951005115d40ca047ea0d11a2"},
+  "authorization_source": "none; formal experiment protocol preparation only; no live request is authorized"
+}

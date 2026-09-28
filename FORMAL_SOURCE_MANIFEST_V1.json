@@ -1,0 +1,25 @@
+{
+  "manifest_version": "v1",
+  "study_kind": "formal_public_database_exploration",
+  "development_contacted_ids": [1, 2, 3, 4, 5, 6],
+  "formal_eligible": {"source_task_ids": [7, 8, 9, 10, 11, 12, 13, 14], "probe_task_ids": [15, 16, 17, 18, 19, 20]},
+  "upstream": {"commit": "5f8c50eb1e84b2eda2ef4faff757dfc812a0ea26", "variant": "pre_migration", "questions_json_sha256": "f98e515c14b74f4d30c29401fb79cca9ceeb15fe9ee2432b10265a4a649d1771", "products_db_sha256": "edf8ee80ff125de0bfd6c37a1d185efa9e3037ce28eb1bd1d32ae0829bd264a6"},
+  "source_task_metadata": [
+    {"task_id": 7, "original_order": 7, "category": "g1_cross_category_reviewers", "difficulty": "hard", "knowledge_dependencies": ["SCHEMA_MAP", "FK_JOINS", "CAT_LEVELS", "GROUP_ID"]},
+    {"task_id": 8, "original_order": 8, "category": "g1_listing_date", "difficulty": "hard", "knowledge_dependencies": ["SCHEMA_MAP", "KV_ATTRS", "GROUP_ID", "DOMAIN_JARGON"]},
+    {"task_id": 9, "original_order": 9, "category": "g2_price", "difficulty": "hard", "knowledge_dependencies": ["SCHEMA_MAP", "PRICE_FMT", "GROUP_ID"]},
+    {"task_id": 10, "original_order": 10, "category": "g2_timestamp", "difficulty": "hard", "knowledge_dependencies": ["SCHEMA_MAP", "TS_FMT", "GROUP_ID"]},
+    {"task_id": 11, "original_order": 11, "category": "g2_review_length", "difficulty": "hard", "knowledge_dependencies": ["SCHEMA_MAP", "GROUP_ID", "FK_JOINS", "PRICE_FMT"]},
+    {"task_id": 12, "original_order": 12, "category": "g2_join_price_review", "difficulty": "hard", "knowledge_dependencies": ["SCHEMA_MAP", "PRICE_FMT", "FK_JOINS", "GROUP_ID"]},
+    {"task_id": 13, "original_order": 13, "category": "g2_review_coverage", "difficulty": "hard", "knowledge_dependencies": ["SCHEMA_MAP", "FK_JOINS", "GROUP_ID", "DATA_QUALITY"]},
+    {"task_id": 14, "original_order": 14, "category": "g1_item_id_quirk", "difficulty": "hard", "knowledge_dependencies": ["SCHEMA_MAP", "FK_JOINS", "GROUP_ID", "DATA_QUALITY"]}
+  ],
+  "condition_source_order": {"F0": [7, 8, 9, 10, 11, 12, 13, 14], "U0": [7, 8, 9, 10, 11, 12, 13, 14], "F1": [7, 8, 9, 10, 11, 12, 13, 14], "U1": [7, 8, 9, 10, 11, 12, 13, 14]},
+  "experience_paths_by_condition": {"F0": ["/memory/experience_001.md", "/memory/experience_002.md", "/memory/experience_003.md", "/memory/experience_004.md", "/memory/experience_005.md", "/memory/experience_006.md", "/memory/experience_007.md", "/memory/experience_008.md"], "U0": ["/memory/experience_001.md", "/memory/experience_002.md", "/memory/experience_003.md", "/memory/experience_004.md", "/memory/experience_005.md", "/memory/experience_006.md", "/memory/experience_007.md", "/memory/experience_008.md"], "F1": ["/memory/experience_001.md", "/memory/experience_002.md", "/memory/experience_003.md", "/memory/experience_004.md", "/memory/experience_005.md", "/memory/experience_006.md", "/memory/experience_007.md", "/memory/experience_008.md"], "U1": ["/memory/experience_001.md", "/memory/experience_002.md", "/memory/experience_003.md", "/memory/experience_004.md", "/memory/experience_005.md", "/memory/experience_006.md", "/memory/experience_007.md", "/memory/experience_008.md"]},
+  "execution_order": [
+    "t07-F0", "t07-U0", "t07-F1", "t07-U1", "t08-U0", "t08-F1", "t08-U1", "t08-F0", "t09-F1", "t09-U1", "t09-F0", "t09-U0", "t10-U1", "t10-F0", "t10-U0", "t10-F1",
+    "t11-F0", "t11-U0", "t11-F1", "t11-U1", "t12-U0", "t12-F1", "t12-U1", "t12-F0", "t13-F1", "t13-U1", "t13-F0", "t13-U0", "t14-U1", "t14-F0", "t14-U0", "t14-F1"
+  ],
+  "episode_rule": "Each token tNN-CONDITION means exactly one source episode. F0/U0 begin empty and archive but do not inherit. F1/U1 t07 begin empty; each later task clones only its own condition's immutable accumulated memory. Every source receives one tool-less deterministic experience-generation decision before evaluator feedback.",
+  "raw_aggregation": {"RAW_F": "concatenate F0 tasks 7..14 pre-consolidation agent-visible trajectories in task order", "RAW_U": "concatenate U0 tasks 7..14 pre-consolidation agent-visible trajectories in task order", "format": "exact UTF-8 serialized agent-visible trajectory payloads separated by a single LF; no headers or research metadata", "excludes": ["evaluator output", "reference answer", "reference SQL", "researcher logs", "consolidation output"]}
+}

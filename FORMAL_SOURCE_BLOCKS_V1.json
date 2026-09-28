@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "source_manifest": {"path": "FORMAL_SOURCE_MANIFEST_V1.json", "sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e"},
+  "blocks": [
+    {"id": "formal_source_block_01", "manifest_positions": [1, 2, 3, 4], "expected_tokens": ["t07-F0", "t07-U0", "t07-F1", "t07-U1"], "next_position": 5},
+    {"id": "formal_source_block_02", "manifest_positions": [5, 6, 7, 8], "expected_tokens": ["t08-U0", "t08-F1", "t08-U1", "t08-F0"], "next_position": 9},
+    {"id": "formal_source_block_03", "manifest_positions": [9, 10, 11, 12], "expected_tokens": ["t09-F1", "t09-U1", "t09-F0", "t09-U0"], "next_position": 13},
+    {"id": "formal_source_block_04", "manifest_positions": [13, 14, 15, 16], "expected_tokens": ["t10-U1", "t10-F0", "t10-U0", "t10-F1"], "next_position": 17},
+    {"id": "formal_source_block_05", "manifest_positions": [17, 18, 19, 20], "expected_tokens": ["t11-F0", "t11-U0", "t11-F1", "t11-U1"], "next_position": 21},
+    {"id": "formal_source_block_06", "manifest_positions": [21, 22, 23, 24], "expected_tokens": ["t12-U0", "t12-F1", "t12-U1", "t12-F0"], "next_position": 25},
+    {"id": "formal_source_block_07", "manifest_positions": [25, 26, 27, 28], "expected_tokens": ["t13-F1", "t13-U1", "t13-F0", "t13-U0"], "next_position": 29},
+    {"id": "formal_source_block_08", "manifest_positions": [29, 30, 31, 32], "expected_tokens": ["t14-U1", "t14-F0", "t14-U0", "t14-F1"], "next_position": null}
+  ]
+}

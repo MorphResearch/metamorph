@@ -1,0 +1,100 @@
+{
+  "status": "PENDING_PUBLIC_CALIBRATION_REVISION_USER_SIGNOFF_NO_LIVE_CALLS",
+  "study_kind": "development_public_calibration",
+  "included_in_primary_analysis": false,
+  "excluded_from_primary_and_future_fu_analysis": true,
+  "revision_scope": "token-budget units and per-episode resource-stop semantics only",
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env_name_only": "DEEPSEEK_API_KEY",
+  "native_task": {
+    "upstream_root": "benchmarks/continual-learning-bench",
+    "upstream_commit": "5f8c50eb1e84b2eda2ef4faff757dfc812a0ea26",
+    "variant": "pre_migration",
+    "database": "data/database_exploration/products.db",
+    "database_sha256": "edf8ee80ff125de0bfd6c37a1d185efa9e3037ce28eb1bd1d32ae0829bd264a6",
+    "questions": "data/database_exploration/questions.json",
+    "questions_sha256": "f98e515c14b74f4d30c29401fb79cca9ceeb15fe9ee2432b10265a4a649d1771",
+    "seed": 42,
+    "max_sql_queries": 15,
+    "source_task": "database_exploration"
+  },
+  "interface": {
+    "allowed_tools": ["list_dir", "query_sql", "read_file", "write_file"],
+    "tool_schema_hash": "92b80b1392dae7ea4351ca148b1c3ec20188272cca1601159ce0604f588de0d2",
+    "forbidden_capabilities": ["python", "bash", "shell", "eval", "import", "arbitrary_code", "web"],
+    "no_model_litellm_shim_permitted": false
+  },
+  "file_budget": {
+    "max_operations": 8,
+    "counted_tools": ["list_dir", "read_file", "write_file"],
+    "max_file_return_bytes": 32768,
+    "separate_from_native_sql_budget": true
+  },
+  "request": {
+    "thinking_enabled": true,
+    "reasoning_effort": "low",
+    "temperature": null,
+    "record_input_characters": true,
+    "max_input_tokens_per_request": 24000,
+    "input_token_estimator": {
+      "name": "calibrated_utf8_half_bytes_plus_chat_tool_overhead_v1",
+      "version": "1",
+      "method": "ceil(UTF-8 bytes of serialized messages plus tools / 2) + 32 per message + 64 per tool",
+      "exact_model_tokenizer_available_offline": false,
+      "post_response_calibration": "record provider prompt_tokens and actual-minus-estimated token error for every completed response"
+    },
+    "enforce_input_token_budget": true,
+    "max_output_tokens_per_request": 2048,
+    "request_timeout_seconds": 45,
+    "episode_timeout_seconds": 1080,
+    "automatic_retries": 0,
+    "sdk_implicit_retries": 0,
+    "max_provider_requests_per_episode": 24,
+    "max_total_tool_calls_per_episode": 23,
+    "input_context_policy": "Before a provider request, stop only the current episode when the recorded input-token estimator is at least 24,000 tokens. Character count and UTF-8 bytes are diagnostic evidence only and do not independently stop an episode. Provider context capacity remains provider-enforced, not this study budget."
+  },
+  "batch_stop_policy": {
+    "per_episode_resource_stop": ["input_token_budget", "output_token_limit", "provider_request_limit", "sql_limit", "file_operation_limit", "episode_timeout"],
+    "stop_entire_batch": ["infrastructure_or_provider_connectivity_fault", "billing_unknown", "authorization_or_hash_mismatch", "permission_or_security_violation", "reference_or_evaluator_leakage", "workspace_or_snapshot_cross_contamination", "batch_hard_cap", "confirmed_systemic_implementation_or_evaluator_error"]
+  },
+  "offpeak_window": {
+    "timezone": "Asia/Shanghai",
+    "start_local": "18:05:00",
+    "end_local": "08:55:00",
+    "minimum_remaining_seconds_for_new_episode": 1080,
+    "official_pricing_peak_local": "Monday-Friday 09:00-12:00 and 14:00-18:00",
+    "policy": "At startup and before every provider request, require the signed local window and official off-peak period. Do not wait, poll, schedule, or send a request outside it."
+  },
+  "episodes": [
+    {"order": 1, "id": "dev-1-f0", "task_id": "1", "task_index": 0, "condition": "F0", "initial_memory": "empty"},
+    {"order": 2, "id": "dev-1-u0", "task_id": "1", "task_index": 0, "condition": "U0", "initial_memory": "empty"},
+    {"order": 3, "id": "dev-2-u0", "task_id": "2", "task_index": 1, "condition": "U0", "initial_memory": "empty"},
+    {"order": 4, "id": "dev-2-f0", "task_id": "2", "task_index": 1, "condition": "F0", "initial_memory": "empty"},
+    {"order": 5, "id": "dev-3-f0", "task_id": "3", "task_index": 2, "condition": "F0", "initial_memory": "empty"},
+    {"order": 6, "id": "dev-3-u0", "task_id": "3", "task_index": 2, "condition": "U0", "initial_memory": "empty"}
+  ],
+  "budget_proposal": {
+    "currency": "USD",
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "price_checked_on": "2026-09-22",
+    "rate_window": "offpeak; official weekday peak exclusions checked per request",
+    "input_cache_hit_usd_per_million": "0.022",
+    "input_cache_miss_usd_per_million": "0.66",
+    "output_usd_per_million": "1.98",
+    "fixed_reference_input_cache_miss_usd_per_million": "1.32",
+    "fixed_reference_output_usd_per_million": "3.96",
+    "worst_case_per_request_usd": "0.01989504",
+    "max_provider_requests": 144,
+    "worst_case_total_usd": "2.86488576",
+    "proposed_hard_cap_usd": "3.00"
+  },
+  "authorization": {
+    "live_requests_authorized": false,
+    "real_model_requests_sent": 0,
+    "paid_evaluator_requests_sent": 0,
+    "formal_78_episode_batch_authorized": false,
+    "authorization_source": "none; revised candidate only, independent from every consumed authorization"
+  }
+}

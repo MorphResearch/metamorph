@@ -1,0 +1,82 @@
+{
+  "authorization_source": "user authorization: Formal Source Block 1 only, 2026-09-27",
+  "block_definition": {
+    "allowed_manifest_positions": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "allowed_tokens": [
+      "t07-F0",
+      "t07-U0",
+      "t07-F1",
+      "t07-U1"
+    ],
+    "block_id": "formal_source_block_01",
+    "next_position_not_authorized": 5,
+    "path": "FORMAL_SOURCE_BLOCKS_V1.json",
+    "sha256": "c54f6efabffad684c9612833a3151f6a2d60bec21dd75735ec394235fd24949a"
+  },
+  "code_dependencies": {
+    "entry": "931475e0c29952c29d700a570f15369b0dca4ec8dd0e2fb3977fb13cc3c7a001",
+    "ledger": "5232ca863350de999752142ba878d91b579104f5fc262da2da7757c32d8de238",
+    "live_bridge": "0573543a1b24f568e918c9e8fcf9cc54ff361af927c299383147efd79f4858dc",
+    "loop": "220718303d4c570e373e108befa908f3978212650de393494193be58595fc5f0",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1",
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "public_calibration_bridge": "e511df297fc8d6638fa2fcbb5d67f20409bf1c8603350c665ada6d803236c4f1",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "workspace": "8c46ac35f5b17acf0b1965604feda4933ea1a832112588d5c9b99fcbdee0f82b"
+  },
+  "consumed_at": "2026-09-26T17:36:39.740232+00:00",
+  "consumption_run_id": "e0-e808a2e0f18a4eccad1e69f0d5d70f9c",
+  "currency": "USD",
+  "development_exclusion": {
+    "development_objects_may_mount": false,
+    "task_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  },
+  "entry_code": {
+    "path": "experiments/experience_value/formal_source_run.py",
+    "sha256": "931475e0c29952c29d700a570f15369b0dca4ec8dd0e2fb3977fb13cc3c7a001"
+  },
+  "formal_protocol": {
+    "path": "FORMAL_EXPERIMENT_PROTOCOL_V1.md",
+    "scientific_diff": "NONE",
+    "sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450"
+  },
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/formal_source_block_01.pending.json",
+    "sha256": "5b3f616cd0c22b60a5c9ee6260ff34014a9b9612c7b6d98698b21d10d1a4da12"
+  },
+  "hard_cap_usd": "7.00",
+  "included_in_primary_analysis": true,
+  "live_requests_authorized": true,
+  "not_authorized": [
+    "manifest position 5 or later",
+    "remaining 28 source episodes",
+    "formal receiver",
+    "calibration",
+    "viability",
+    "smoke requests"
+  ],
+  "real_model_requests_sent_under_this_authorization": 1,
+  "source_manifest": {
+    "path": "FORMAL_SOURCE_MANIFEST_V1.json",
+    "sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e"
+  },
+  "status": "CONSUMED_FORMAL_SOURCE_BLOCK_01",
+  "study_kind": "formal_source_v1",
+  "task_data": {
+    "products_db_sha256": "edf8ee80ff125de0bfd6c37a1d185efa9e3037ce28eb1bd1d32ae0829bd264a6",
+    "questions_json_sha256": "f98e515c14b74f4d30c29401fb79cca9ceeb15fe9ee2432b10265a4a649d1771"
+  }
+}

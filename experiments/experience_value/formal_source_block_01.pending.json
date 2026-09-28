@@ -1,0 +1,15 @@
+{
+  "status": "PENDING_FORMAL_SOURCE_BLOCK_01_USER_SIGNOFF_NO_LIVE_CALLS",
+  "live_requests_authorized": false,
+  "study_kind": "formal_source_v1",
+  "included_in_primary_analysis": true,
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "formal_protocol": {"path": "FORMAL_EXPERIMENT_PROTOCOL_V1.md", "sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450"},
+  "formal_pending": {"path": "experiments/experience_value/public_formal_experiment_v1.pending.json", "sha256": "8a6f3664c8668b73f976d290afe101e1e6de17662f0e3e6def04900e776c221c"},
+  "source_manifest": {"path": "FORMAL_SOURCE_MANIFEST_V1.json", "sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e"},
+  "block_definition": {"path": "FORMAL_SOURCE_BLOCKS_V1.json", "sha256": "c54f6efabffad684c9612833a3151f6a2d60bec21dd75735ec394235fd24949a"},
+  "block_id": "formal_source_block_01",
+  "budget": {"currency": "USD", "hard_cap_usd": "7.00", "max_provider_attempts": 200, "input_cache_hit_usd_per_million": "0.022", "input_cache_miss_usd_per_million": "0.66", "output_usd_per_million": "1.98", "price_source": "https://api-docs.deepseek.com/quick_start/pricing/", "price_checked_on": "2026-09-27", "worst_case_per_attempt_usd": "0.03206016", "worst_case_block_usd": "6.41203200"},
+  "development_exclusion": {"ids": [1,2,3,4,5,6], "forbidden_objects": ["calibration", "viability", "development artifacts", "development RAW", "development snapshots"]}
+}

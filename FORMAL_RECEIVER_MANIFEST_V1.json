@@ -1,0 +1,15 @@
+{
+  "manifest_version": "v1",
+  "study_kind": "formal_public_database_exploration",
+  "probe_task_ids": [15, 16, 17, 18, 19, 20],
+  "receiver_conditions": ["EMPTY", "M_F", "M_U", "RAW_F", "RAW_U"],
+  "receiver_prompt": "Complete the current task using the same /memory and /work file interface.",
+  "receiver_budget": {"model": "deepseek-v4-pro", "thinking_enabled": true, "reasoning_effort": "low", "max_main_model_decisions": 24, "max_query_sql": 15, "max_file_operations": 8, "max_input_tokens_per_request": 24000, "max_output_tokens_per_request": 8192, "request_timeout_seconds": 120, "episode_timeout_seconds": 1080, "task_model_retries": 0, "sdk_retries": 0, "max_pre_response_transport_retries": 1, "consolidation_enabled": false},
+  "resource_construction": {"EMPTY": "fresh empty immutable memory snapshot", "M_F": "F1 final accumulated immutable /memory snapshot after task 14", "M_U": "U1 final accumulated immutable /memory snapshot after task 14", "RAW_F": "formal-source manifest RAW_F aggregate mounted as a single immutable /memory/raw_f.txt", "RAW_U": "formal-source manifest RAW_U aggregate mounted as a single immutable /memory/raw_u.txt"},
+  "execution_order": [
+    "t15-EMPTY", "t15-M_F", "t15-M_U", "t15-RAW_F", "t15-RAW_U", "t16-M_F", "t16-M_U", "t16-RAW_F", "t16-RAW_U", "t16-EMPTY", "t17-M_U", "t17-RAW_F", "t17-RAW_U", "t17-EMPTY", "t17-M_F", "t18-RAW_F", "t18-RAW_U", "t18-EMPTY", "t18-M_F", "t18-M_U", "t19-RAW_U", "t19-EMPTY", "t19-M_F", "t19-M_U", "t19-RAW_F", "t20-EMPTY", "t20-M_F", "t20-M_U", "t20-RAW_F", "t20-RAW_U"
+  ],
+  "isolation": "Every probe uses a new session and a clone of its immutable resource. Probe writes never return to a source object and cannot affect another probe.",
+  "receiver_use_logging": ["resource_existed", "resource_mounted_path", "list_dir_proposed_dispatched", "read_file_proposed_dispatched", "resource_content_entered_model_context", "source_paths_read"],
+  "formal_exclusions": ["development IDs 1-6", "calibration traces", "viability traces", "development artifacts", "development RAW", "development snapshots"]
+}

@@ -1,0 +1,62 @@
+{
+  "authorization_id": "public-viability-operational-v2-20260926T153029Z",
+  "authorization_source": "user confirmation: execute public viability gate operational_v2 once",
+  "authorized_at_utc": "2026-09-26T15:30:29Z",
+  "code_dependencies": {
+    "entry": "9930c16a6e433524b24da26a63f51abf9b60eaff1807c78076499d1ac30dc05e",
+    "ledger": "5232ca863350de999752142ba878d91b579104f5fc262da2da7757c32d8de238",
+    "live_bridge": "0e164db98e136def55a00f41fdd4df136b7f23e4ea638effbc2f43d90d8b05c7",
+    "loop": "7df080c8a258e7dd32ee3239443c8b217eba52748e6cb69854c21110a7737cce",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1",
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "public_calibration_bridge": "e511df297fc8d6638fa2fcbb5d67f20409bf1c8603350c665ada6d803236c4f1",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "workspace": "d2998154c834c061367dc2d32def386e6de85d84f5d6f63d3bf2dc7d9646f10f"
+  },
+  "consumed_at": "2026-09-26T15:35:27.327046+00:00",
+  "consumption_run_id": "e0-cadce996332b4dcab4900c83c3ac1bb9",
+  "entry_code": {
+    "path": "experiments/experience_value/public_viability_gate_run.py",
+    "sha256": "9930c16a6e433524b24da26a63f51abf9b60eaff1807c78076499d1ac30dc05e"
+  },
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/public_viability_gate.operational_v2.pending.json",
+    "sha256": "c995c0bea8baae087e4deb94e8919deecd889cfb0033283b13a3fe5577d3307e"
+  },
+  "live_requests_authorized": true,
+  "price_check": {
+    "checked_at_utc": "2026-09-26T15:30:29Z",
+    "currency": "USD",
+    "hard_cap_usd": "4.00",
+    "input_cache_hit_usd_per_million": "0.022",
+    "input_cache_miss_usd_per_million": "0.66",
+    "output_usd_per_million": "1.98",
+    "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "transport_inclusive_max_attempts": 100,
+    "worst_case_per_attempt_usd": "0.03206016",
+    "worst_case_total_usd": "3.20601600"
+  },
+  "real_model_requests_sent_under_this_authorization": 1,
+  "scope": {
+    "episodes": [
+      "viability-1-f0",
+      "viability-2-u0"
+    ],
+    "hard_cap_usd": "4.00",
+    "max_episodes": 2,
+    "max_provider_attempts": 100,
+    "not_authorized": [
+      "formal F0/U0/F1/U1",
+      "48+30",
+      "receiver",
+      "additional episodes"
+    ],
+    "offpeak_only": "Asia/Shanghai 18:05-08:55"
+  },
+  "status": "CONSUMED_PUBLIC_VIABILITY_GATE_OPERATIONAL_V2",
+  "task_manifest": {
+    "path": "experiments/experience_value/public_viability_gate.tasks.md",
+    "sha256": "63a759c611c4ea7a267d633572d2ba71b4074340c594fa90de4f7911366d1a8c"
+  }
+}

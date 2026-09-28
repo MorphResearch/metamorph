@@ -29,6 +29,8 @@ class AdapterResponse:
     reasoning: str = ""
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
+    stop_reason: str | None = None
+    request_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def _usage(value: Any) -> dict[str, int]:
@@ -41,6 +43,10 @@ def _usage(value: Any) -> dict[str, int]:
         ("completion_tokens", "completion_tokens"),
         ("output_tokens", "completion_tokens"),
         ("total_tokens", "total_tokens"),
+        ("cached_tokens", "cached_tokens"),
+        ("prompt_cache_hit_tokens", "prompt_cache_hit_tokens"),
+        ("prompt_cache_miss_tokens", "prompt_cache_miss_tokens"),
+        ("reasoning_tokens", "reasoning_tokens"),
     ):
         raw = value.get(source) if isinstance(value, dict) else getattr(value, source, None)
         if raw is not None:
@@ -48,6 +54,21 @@ def _usage(value: Any) -> dict[str, int]:
                 result[target] = int(raw)
             except (TypeError, ValueError):
                 continue
+    # OpenAI-compatible SDKs commonly nest these fields.  Preserve only data
+    # actually supplied by the provider; callers must not invent zeroes.
+    details = value.get("completion_tokens_details") if isinstance(value, dict) else getattr(value, "completion_tokens_details", None)
+    cached_details = value.get("prompt_tokens_details") if isinstance(value, dict) else getattr(value, "prompt_tokens_details", None)
+    for details_value, source, target in (
+        (details, "reasoning_tokens", "reasoning_tokens"),
+        (cached_details, "cached_tokens", "cached_tokens"),
+        (cached_details, "cached_tokens", "prompt_cache_hit_tokens"),
+    ):
+        raw = details_value.get(source) if isinstance(details_value, dict) else getattr(details_value, source, None)
+        if raw is not None:
+            try:
+                result[target] = int(raw)
+            except (TypeError, ValueError):
+                pass
     if "total_tokens" not in result and {"prompt_tokens", "completion_tokens"} <= result.keys():
         result["total_tokens"] = result["prompt_tokens"] + result["completion_tokens"]
     return result
@@ -149,6 +170,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             reasoning=getattr(message, "reasoning_content", "") or "",
             tool_calls=[_tool_call_dict(tc) for tc in (getattr(message, "tool_calls", None) or [])],
             usage=_usage(getattr(response, "usage", None)),
+            stop_reason=getattr(response.choices[0], "finish_reason", None),
         )
 
     def complete_configured(
@@ -173,9 +195,15 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             request_client = self.client.with_options(**options)
         elif timeout is not None:
             kwargs["timeout"] = timeout
-        for key in ("temperature", "seed", "max_tokens", "response_format"):
+        if generation_options.get("omit_tool_choice"):
+            kwargs.pop("tool_choice", None)
+        for key in ("temperature", "seed", "max_tokens", "response_format", "reasoning_effort"):
             if generation_options.get(key) is not None:
                 kwargs[key] = generation_options[key]
+        extra_body = generation_options.get("extra_body")
+        if extra_body is not None:
+            existing = kwargs.get("extra_body", {})
+            kwargs["extra_body"] = {**existing, **extra_body}
         response = request_client.chat.completions.create(**kwargs)
         message = response.choices[0].message
         return AdapterResponse(
@@ -183,6 +211,18 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             reasoning=getattr(message, "reasoning_content", "") or "",
             tool_calls=[_tool_call_dict(tc) for tc in (getattr(message, "tool_calls", None) or [])],
             usage=_usage(getattr(response, "usage", None)),
+            stop_reason=getattr(response.choices[0], "finish_reason", None),
+            request_metadata={
+                "model": kwargs.get("model"),
+                "response_model": getattr(response, "model", None),
+                "tool_choice_present": "tool_choice" in kwargs,
+                "tool_choice": kwargs.get("tool_choice"),
+                "thinking": kwargs.get("extra_body", {}).get("thinking"),
+                "reasoning_effort": kwargs.get("reasoning_effort"),
+                "max_tokens": kwargs.get("max_tokens"),
+                "timeout_bound": timeout is not None,
+                "sdk_max_retries": 0 if hasattr(self.client, "with_options") else "not_sdk_bound",
+            },
         )
 
 
@@ -277,6 +317,7 @@ class AnthropicAdapter(ProviderAdapter):
             reasoning="".join(reasoning_parts),
             tool_calls=tool_calls,
             usage=_usage(getattr(response, "usage", None)),
+            stop_reason=getattr(response, "stop_reason", None),
         )
 
     def complete_configured(
@@ -320,6 +361,7 @@ class AnthropicAdapter(ProviderAdapter):
             reasoning="".join(reasoning_parts),
             tool_calls=tool_calls,
             usage=_usage(getattr(response, "usage", None)),
+            stop_reason=getattr(response, "stop_reason", None),
         )
 
     def stream(self, *, model_name: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Iterator[AdapterChunk]:

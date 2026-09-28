@@ -41,6 +41,10 @@ class AgentSession:
     memory_root: Path
     work_root: Path
     parent_snapshot_id: str | None
+    # Files inherited from a frozen source snapshot are agent-readable but
+    # cannot be overwritten by a later source episode.  Each later episode
+    # may add a new, episode-unique experience file of its own.
+    immutable_memory_files: tuple[str, ...] = ()
 
 
 def _safe_relative(path: str) -> tuple[str, Path]:
@@ -135,6 +139,7 @@ class WorkspaceManager:
             memory_root=memory,
             work_root=work,
             parent_snapshot_id=parent.snapshot_id if parent else None,
+            immutable_memory_files=parent.files if parent else (),
         )
 
     def resolve_agent_path(self, session: AgentSession, logical_path: str) -> Path:
@@ -145,12 +150,50 @@ class WorkspaceManager:
             raise WorkspaceAccessError("only /memory and /work are visible to the agent")
         _, relative = _safe_relative(remainder or ".")
         root = session.memory_root if prefix == "memory" else session.work_root
-        target = (root / relative).resolve()
+        raw_target = root / relative
+        # Reject every symlink component before resolution.  It prevents a
+        # directory listing from becoming a way to traverse a link inside an
+        # otherwise valid logical root.
+        current = root
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                raise WorkspaceAccessError("symbolic links are not permitted in agent paths")
+        target = raw_target.resolve()
         try:
             target.relative_to(root.resolve())
         except ValueError as exc:
             raise WorkspaceAccessError("agent path escapes logical workspace") from exc
         return target
+
+    def list_agent_directory(self, session: AgentSession, logical_path: str, max_entries: int = 64) -> dict[str, object]:
+        """List one logical directory without reading any file contents."""
+        if max_entries < 1:
+            raise ValueError("directory listing limit must be positive")
+        target = self.resolve_agent_path(session, logical_path)
+        if not target.exists():
+            raise WorkspaceAccessError("agent directory does not exist")
+        if not target.is_dir():
+            raise WorkspaceAccessError("agent path is not a directory")
+        entries = []
+        for item in sorted(target.iterdir(), key=lambda candidate: candidate.name):
+            if item.is_symlink():
+                # Do not dereference or reveal the target of a link.
+                entries.append({"name": item.name, "type": "symlink_blocked"})
+            elif item.is_dir():
+                entries.append({"name": item.name, "type": "directory"})
+            elif item.is_file():
+                entries.append({"name": item.name, "type": "file"})
+            else:
+                entries.append({"name": item.name, "type": "other_blocked"})
+        returned = entries[:max_entries]
+        return {
+            "path": logical_path,
+            "entries": returned,
+            "returned": len(returned),
+            "truncated": len(entries) > len(returned),
+            "limit": max_entries,
+        }
 
     def read_agent_file(self, session: AgentSession, logical_path: str) -> bytes:
         target = self.resolve_agent_path(session, logical_path)
@@ -160,6 +203,11 @@ class WorkspaceManager:
 
     def write_agent_file(self, session: AgentSession, logical_path: str, data: bytes) -> None:
         target = self.resolve_agent_path(session, logical_path)
+        normalized = logical_path.lstrip("/")
+        if normalized.startswith("memory/"):
+            relative = normalized.removeprefix("memory/")
+            if relative in session.immutable_memory_files:
+                raise WorkspaceAccessError("inherited frozen memory artifacts are immutable")
         target.parent.mkdir(parents=True, exist_ok=True)
         # Check every existing parent after resolution.  This also rejects a
         # link introduced by an external process during a test.

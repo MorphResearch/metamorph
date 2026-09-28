@@ -1,0 +1,105 @@
+{
+  "status": "PENDING_PUBLIC_VIABILITY_GATE_USER_SIGNOFF_NO_LIVE_CALLS",
+  "study_kind": "development_public_viability_gate",
+  "included_in_primary_analysis": false,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env_name_only": "DEEPSEEK_API_KEY",
+  "native_task": {
+    "upstream_root": "benchmarks/continual-learning-bench",
+    "upstream_commit": "5f8c50eb1e84b2eda2ef4faff757dfc812a0ea26",
+    "variant": "pre_migration",
+    "seed": 42,
+    "max_sql_queries": 15,
+    "source_task": "database_exploration"
+  },
+  "interface": {
+    "allowed_tools": ["list_dir", "query_sql", "read_file", "write_file"],
+    "tool_schema_hash": "92b80b1392dae7ea4351ca148b1c3ec20188272cca1601159ce0604f588de0d2",
+    "forbidden_capabilities": ["python", "bash", "shell", "eval", "import", "arbitrary_code", "web"]
+  },
+  "file_budget": {
+    "max_operations": 8,
+    "max_file_return_bytes": 32768,
+    "separate_from_native_sql_budget": true
+  },
+  "request": {
+    "thinking_enabled": true,
+    "reasoning_effort": "low",
+    "temperature": null,
+    "max_input_tokens_per_request": 24000,
+    "max_output_tokens_per_request": 8192,
+    "request_timeout_seconds": 120,
+    "episode_timeout_seconds": 1080,
+    "automatic_retries": 0,
+    "sdk_implicit_retries": 0,
+    "max_transport_retries": 1,
+    "max_provider_requests_per_episode": 24,
+    "max_total_tool_calls_per_episode": 23,
+    "enforce_input_token_budget": true,
+    "input_token_estimator": {
+      "name": "calibrated_utf8_half_bytes_plus_chat_tool_overhead_v1",
+      "version": "1",
+      "role": "diagnostic_only"
+    },
+    "formal_input_cutoff": {
+      "name": "deepseek_prompt_usage_calibrated_v1",
+      "version": "1",
+      "formula": "ceil(diagnostic_estimated_tokens * 0.50) + 256",
+      "calibration_data": "final_v3:46_completed_provider_prompt_token_observations; scores_and_condition_outcomes_excluded",
+      "formal_cutoff_tokens": 24000
+    }
+  },
+  "terminal_answer_interface": {
+    "enabled": true,
+    "trigger": "after the fifteenth legal query_sql feedback is appended",
+    "max_terminal_model_decisions": 1,
+    "counts_within_main_24_model_decisions": true,
+    "allowed_tools": [],
+    "accept": "ordinary_text_only",
+    "native_answer_submissions": 1,
+    "no_automatic_finalization_retry": true,
+    "other_resource_stop_policy": {
+      "terminal_opportunity": ["query_sql_limit_only_when_main_decision_capacity_remains"],
+      "direct_resource_stop": ["input_token_limit", "output_token_limit", "main_model_decision_limit", "file_operation_limit", "episode_timeout"]
+    }
+  },
+  "optional_consolidation": {
+    "enabled": true,
+    "prompt": "你现在可以选择把任何你认为可能对未来任务有帮助的可复用信息保存到 /memory。内容和格式由你决定，也可以选择不保存。未来独立 session 在允许的条件下可能接收该 /memory snapshot。",
+    "max_model_decisions": 1,
+    "max_file_operations": 2,
+    "allowed_tools": ["list_dir", "read_file", "write_file"],
+    "sql_allowed": false,
+    "timing": "after native ANSWER submission or main resource termination; before native evaluator; no evaluator or reference feedback visible"
+  },
+  "formal_snapshot_policy": {
+    "F0_U0": "archive consolidation snapshot; do not inherit into the next source task",
+    "F1_U1": "only the immutable consolidation /memory snapshot may mount into the next permitted source task",
+    "agent_visible_research_log": false,
+    "calibration_or_gate_artifacts_may_enter_formal_samples": false
+  },
+  "episodes": [
+    {"order": 1, "id": "viability-1-f0", "task_id": "1", "task_index": 0, "condition": "F0", "initial_memory": "empty"},
+    {"order": 2, "id": "viability-2-u0", "task_id": "2", "task_index": 1, "condition": "U0", "initial_memory": "empty"}
+  ],
+  "budget_proposal": {
+    "currency": "USD",
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "price_checked_on": "2026-09-26",
+    "input_cache_hit_usd_per_million": "0.022",
+    "input_cache_miss_usd_per_million": "0.66",
+    "output_usd_per_million": "1.98",
+    "worst_case_per_request_usd": "0.03206016",
+    "logical_completed_decisions_per_episode": 25,
+    "max_provider_attempts": 100,
+    "worst_case_total_usd": "3.20601600",
+    "proposed_hard_cap_usd": "4.00"
+  },
+  "authorization": {
+    "live_requests_authorized": false,
+    "real_model_requests_sent": 0,
+    "authorization_source": "none; independent viability-gate candidate only"
+  }
+}

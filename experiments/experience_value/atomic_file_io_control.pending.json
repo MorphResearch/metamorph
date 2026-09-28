@@ -1,0 +1,60 @@
+{
+  "status": "PENDING_INDEPENDENT_USER_SIGNOFF_NO_LIVE_CALLS",
+  "study_kind": "engineering_atomic_file_io_control",
+  "included_in_primary_analysis": false,
+  "excluded_from_future_fu_research_samples": true,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env_name_only": "DEEPSEEK_API_KEY",
+  "interface": {
+    "allowed_tools": ["list_dir", "read_file", "write_file", "query_sql"],
+    "forbidden_capabilities": ["python", "bash", "shell", "eval", "import", "arbitrary_code", "web"]
+  },
+  "request": {
+    "thinking_enabled": true,
+    "reasoning_effort": "low",
+    "temperature": null,
+    "max_input_characters": 20480,
+    "max_input_tokens_per_request": 5120,
+    "max_output_tokens_per_request": 512,
+    "timeout_seconds": 30,
+    "automatic_retries": 0,
+    "sdk_implicit_retries": 0,
+    "max_provider_requests_per_episode": 6,
+    "max_tool_calls_per_episode": 6
+  },
+  "episodes": [
+    {
+      "order": 1,
+      "id": "pc_atomic_write",
+      "condition": "PC-WRITE",
+      "allowed_tools": ["query_sql", "write_file"],
+      "instruction": "Run exactly this query: SELECT payload FROM io_probe. Save the payload returned by that query in a file under /memory. Choose the file name yourself."
+    },
+    {
+      "order": 2,
+      "id": "pc_atomic_read",
+      "condition": "PC-READ",
+      "allowed_tools": ["list_dir", "read_file"],
+      "instruction": "Use list_dir on /memory. If a file is present, discover its path and read it. Return the marker contained in the file."
+    }
+  ],
+  "source_failure_rule": "If PC-WRITE does not save the exact queried payload, record BLOCKED_SOURCE_ARTIFACT and do not start PC-READ or create a replacement file.",
+  "budget_proposal": {
+    "currency": "USD",
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "price_checked_on": "2026-09-21",
+    "input_cache_miss_usd_per_million": "1.32",
+    "output_usd_per_million": "3.96",
+    "worst_case_per_request_usd": "0.00878592",
+    "max_provider_requests": 12,
+    "worst_case_total_usd": "0.10543104",
+    "proposed_hard_cap_usd": "0.20"
+  },
+  "authorization": {
+    "live_requests_authorized": false,
+    "real_model_requests_sent": 0,
+    "formal_48_plus_30_batch_authorized": false
+  }
+}

@@ -14,12 +14,21 @@
       "answer_or_reference_query_exposed_to_agent": false
     },
     {
-      "id": "local_fixture_probe_region_aggregate",
+      "id": "local_fixture_estimate_coastal_mean",
       "phase": "probe",
       "status": "engineering_smoke_only",
       "answer_or_reference_query_exposed_to_agent": false
     }
   ],
+  "tool_only_live_smoke": {
+    "status": "AUTHORIZED_FOR_EXACT_THREE_EPISODES",
+    "included_in_primary_analysis": false,
+    "fixed_episode_order": [
+      {"order": 1, "condition": "U1", "task_id": "local_fixture_u1_practice_region_cluster", "memory": "EMPTY"},
+      {"order": 2, "condition": "E*", "task_id": "local_fixture_estimate_coastal_mean", "memory": "M_U"},
+      {"order": 3, "condition": "E*", "task_id": "local_fixture_estimate_coastal_mean", "memory": "EMPTY"}
+    ],
+    "fourth_episode_forbidden": true
+  },
   "formal_manifest": "PENDING_PUBLIC_ENVIRONMENT_AND_PROTOCOL_FREEZE"
 }
-

@@ -24,7 +24,9 @@ SourceKind = Literal["EMPTY", "M_F", "M_U", "RAW_F", "RAW_U"]
 
 SHARED_PROMPT = (
     "Complete the current task using visible tool feedback. You may use files in /memory "
-    "and may save reusable text, code, or tests there, but no artifact is required."
+    "and may save reusable text, code, or tests there, but no artifact is required. "
+    "If you choose to save one, its immutable snapshot may be independently cloned into "
+    "a later new session when that session's condition permits it."
 )
 FIXED_PROMPT = (
     "Organize your work as: inspect task and materials; implement; check and revise if needed; "
@@ -61,6 +63,11 @@ class AgentRuntime:
         self.manager.write_agent_file(self.session, logical_path, data)
         self.records.emit("agent.file_write", attempt_id=self.session.attempt_id, path=logical_path, bytes=len(data))
 
+    def list_dir(self, logical_path: str) -> dict[str, object]:
+        result = self.manager.list_agent_directory(self.session, logical_path)
+        self.records.emit("agent.dir_list", attempt_id=self.session.attempt_id, path=logical_path, returned=result["returned"], truncated=result["truncated"])
+        return result
+
 
 class ExperimentRunner:
     def __init__(self, output_root: Path, receiver_config: dict[str, object] | None = None):
@@ -78,6 +85,7 @@ class ExperimentRunner:
         replicate: str,
         task_id: str,
         parent: Snapshot | None = None,
+        task_text: str | None = None,
     ) -> PreparedTask:
         should_retain = condition.endswith("1")
         session = self.manager.start_task(
@@ -87,15 +95,30 @@ class ExperimentRunner:
             parent=parent if should_retain else None,
         )
         workflow = FIXED_PROMPT if condition.startswith("F") else AUTONOMOUS_PROMPT
-        prompt = f"{SHARED_PROMPT}\n\nTask: {task_id}\n\n{workflow}"
+        prompt = f"{SHARED_PROMPT}\n\nTask ID: {task_id}\nTask: {task_text or task_id}\n\n{workflow}"
         prepared = PreparedTask(
             session=session,
             prompt=prompt,
-            tool_schema_hash=stable_hash(["read_file", "write_file", "list_files", "query_sql"]),
+            tool_schema_hash=stable_hash(["list_dir", "read_file", "write_file", "query_sql"]),
             request_config_hash=stable_hash({"same_loop": "single_agent", "same_limits": True}),
         )
         self.records.emit(
             "task.prepared", attempt_id=session.attempt_id, condition=condition, task_id=task_id,
+            conversation_id=session.conversation_id, parent_snapshot_id=session.parent_snapshot_id,
+            prompt_hash=stable_hash(prompt), tool_schema_hash=prepared.tool_schema_hash,
+            request_config_hash=prepared.request_config_hash,
+        )
+        return prepared
+
+    def prepare_receiver_task(self, task_id: str, task_text: str, parent: Snapshot) -> PreparedTask:
+        """Prepare a new E* conversation without inheriting source messages."""
+        session = self.manager.start_task(condition="E*", replicate="receiver", task_id=task_id, parent=parent)
+        prompt = f"{RECEIVER_PROMPT}\n\nTask ID: {task_id}\nTask: {task_text}"
+        prepared = PreparedTask(
+            session, prompt, stable_hash(["list_dir", "read_file", "write_file", "query_sql"]), stable_hash(self.receiver_config)
+        )
+        self.records.emit(
+            "task.prepared", attempt_id=session.attempt_id, condition="E*", task_id=task_id,
             conversation_id=session.conversation_id, parent_snapshot_id=session.parent_snapshot_id,
             prompt_hash=stable_hash(prompt), tool_schema_hash=prepared.tool_schema_hash,
             request_config_hash=prepared.request_config_hash,
@@ -126,7 +149,7 @@ class ExperimentRunner:
                 raise ValueError(f"source {kind} is pending; it cannot silently become EMPTY")
             source = sources[kind]
         session = self.manager.start_task(condition="E*", replicate="receiver", task_id=task_id, parent=source)
-        prepared = PreparedTask(session, RECEIVER_PROMPT, stable_hash(["read_file", "write_file", "list_files", "query_sql"]), stable_hash(self.receiver_config))
+        prepared = PreparedTask(session, RECEIVER_PROMPT, stable_hash(["list_dir", "read_file", "write_file", "query_sql"]), stable_hash(self.receiver_config))
         answer, output = self.run_scripted(prepared, receiver)
         self.records.emit(
             "probe.completed", source_kind=kind, source_snapshot_id=source.snapshot_id,

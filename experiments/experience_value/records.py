@@ -32,6 +32,8 @@ class LiveAuthorization:
     hard_cap: Decimal | None = None
     max_requests: int | None = None
     price_basis: str | None = None
+    max_episodes: int = 3
+    episode_cap: int = 3
 
     def validate(self) -> None:
         if not self.authorized:
@@ -40,8 +42,8 @@ class LiveAuthorization:
             raise AuthorizationError("provider, model, currency, and price basis must be confirmed")
         if self.hard_cap is None or self.hard_cap <= 0 or self.max_requests is None or self.max_requests < 1:
             raise AuthorizationError("a positive hard cap and request limit are required")
-        if self.max_requests > 3:
-            raise AuthorizationError("Day-1 live smoke permits at most three complete task episodes")
+        if self.episode_cap < 1 or self.max_episodes < 1 or self.max_episodes > self.episode_cap:
+            raise AuthorizationError("authorization episode count exceeds its explicit scoped cap")
 
 
 class CostLedger:
@@ -54,9 +56,13 @@ class CostLedger:
         self.settled = Decimal("0")
         self.billing_unknown = False
 
-    def reserve(self, estimated_worst_case: Decimal) -> str:
+    def reserve(self, estimated_worst_case: Decimal, *, transport_retry: bool = False) -> str:
         self.authorization.validate()
-        if self.billing_unknown:
+        unresolved_unknown = any(
+            entry.get("status") == "billing_unknown" and not entry.get("transport_retry_recovered", False)
+            for entry in self.entries
+        )
+        if unresolved_unknown and not transport_retry:
             raise BudgetError("billing is unknown; later live calls are paused")
         if len(self.entries) >= (self.authorization.max_requests or 0):
             raise BudgetError("request limit reached")
@@ -64,7 +70,10 @@ class CostLedger:
             raise BudgetError("hard cap would be exceeded")
         entry_id = uuid.uuid4().hex
         self.reserved += estimated_worst_case
-        self.entries.append({"id": entry_id, "status": "reserved", "reserved": str(estimated_worst_case)})
+        self.entries.append({
+            "id": entry_id, "status": "reserved", "reserved": str(estimated_worst_case),
+            "transport_retry": transport_retry,
+        })
         return entry_id
 
     def settle(self, entry_id: str, actual: Decimal | None, usage: dict[str, Any] | None) -> None:
@@ -76,6 +85,18 @@ class CostLedger:
             return
         entry.update({"status": "settled", "actual": str(actual)})
         self.settled += actual
+
+    def mark_transport_retry_recovered(self, entry_id: str) -> None:
+        """Retain an unknown-billing attempt while allowing its exact retry to continue.
+
+        The unreconciled reservation remains in the ledger.  This deliberately
+        narrow exception to the normal unknown-billing pause is only invoked
+        after the one identical, pre-response transport retry has succeeded.
+        """
+        entry = next(item for item in self.entries if item["id"] == entry_id)
+        if entry.get("status") != "billing_unknown":
+            raise ValueError("only an unknown-billing transport attempt may be recovered")
+        entry["transport_retry_recovered"] = True
 
 
 class RunRecords:
@@ -95,6 +116,13 @@ class RunRecords:
     def write_json(self, name: str, payload: Any) -> Path:
         path = self.root / name
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        return path
+
+    def append_jsonl(self, name: str, payload: Any) -> Path:
+        """Write runner-only evidence to a named append-only JSONL file."""
+        path = self.root / name
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
         return path
 
 

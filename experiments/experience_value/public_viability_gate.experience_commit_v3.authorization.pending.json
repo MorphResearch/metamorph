@@ -1,0 +1,30 @@
+{
+  "status": "PENDING_PUBLIC_VIABILITY_GATE_EXPERIENCE_COMMIT_V3_USER_SIGNOFF_NO_LIVE_CALLS",
+  "live_requests_authorized": false,
+  "real_model_requests_sent_under_this_authorization": 0,
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/public_viability_gate.experience_commit_v3.pending.json",
+    "sha256": "3ff57258fbac867fe4cd9261c3926c5f7b6de49edc7fb8e18069a37356fde463"
+  },
+  "task_manifest": {
+    "path": "experiments/experience_value/public_viability_gate.tasks.md",
+    "sha256": "63a759c611c4ea7a267d633572d2ba71b4074340c594fa90de4f7911366d1a8c"
+  },
+  "entry_code": {
+    "path": "experiments/experience_value/public_viability_gate_run.py",
+    "sha256": "4ad6bc58c7804b86b9afeaa812c97e508e7a0754311b1583e8a96781b6fa129f"
+  },
+  "code_dependencies": {
+    "entry": "4ad6bc58c7804b86b9afeaa812c97e508e7a0754311b1583e8a96781b6fa129f",
+    "live_bridge": "0573543a1b24f568e918c9e8fcf9cc54ff361af927c299383147efd79f4858dc",
+    "public_calibration_bridge": "e511df297fc8d6638fa2fcbb5d67f20409bf1c8603350c665ada6d803236c4f1",
+    "loop": "220718303d4c570e373e108befa908f3978212650de393494193be58595fc5f0",
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "workspace": "8c46ac35f5b17acf0b1965604feda4933ea1a832112588d5c9b99fcbdee0f82b",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "ledger": "5232ca863350de999752142ba878d91b579104f5fc262da2da7757c32d8de238",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1"
+  },
+  "authorization_source": "none; experience-commit interface candidate only; no provider requests are authorized"
+}

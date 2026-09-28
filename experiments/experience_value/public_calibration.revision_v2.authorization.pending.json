@@ -1,0 +1,43 @@
+{
+  "status": "PENDING_PUBLIC_CALIBRATION_REVISION_V2_USER_SIGNOFF_NO_LIVE_CALLS",
+  "authorization_id": "public_database_exploration_calibration_revision_v2_pending_20260924",
+  "authorization_source": "none; a fresh authorization is required for the 8192-output candidate; no consumed authorization or balance is reused",
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/public_calibration.revision_v2.pending.json",
+    "sha256": "a32963d29d401c88e89a4cef8a0b10592777e57668f100eb5fc3b96200df2a00"
+  },
+  "frozen_task_manifest": {
+    "path": "experiments/experience_value/public_calibration.tasks.md",
+    "sha256": "be6cb33cfa743d2bad98de52613b9c66e3411b2093c709598ed4fae9474c1b6a"
+  },
+  "entry_code": {
+    "path": "experiments/experience_value/public_calibration_run.py",
+    "sha256": "6afa5e11a99752abe642286f623d2325f9251e223006e39b00e44a499ea18ed6"
+  },
+  "code_dependencies": {
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "live_bridge": "230f94cb59baeebef43aa12b95b71c722bc3e4a4a2267d277934efe47917a134",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "workspace": "d2998154c834c061367dc2d32def386e6de85d84f5d6f63d3bf2dc7d9646f10f",
+    "records": "5232ca863350de999752142ba878d91b579104f5fc262da2da7757c32d8de238",
+    "loop": "ac176d542ae92f721fd1fc3236bd058103845b1f30e4df969356d4e6c55bf897",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1"
+  },
+  "study_kind": "development_public_calibration",
+  "included_in_primary_analysis": false,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "max_episodes": 6,
+  "max_provider_requests": 144,
+  "hard_cap_usd": "5.00",
+  "offpeak_window": {
+    "timezone": "Asia/Shanghai",
+    "start_local": "18:05:00",
+    "end_local": "08:55:00"
+  },
+  "live_requests_authorized": false,
+  "real_model_requests_sent_under_this_authorization": 0,
+  "paid_evaluator_requests_sent_under_this_authorization": 0,
+  "formal_78_episode_batch_authorized": false
+}

@@ -1,0 +1,23 @@
+{
+  "status": "PENDING_INDEPENDENT_USER_SIGNOFF_NO_LIVE_CALLS",
+  "authorization_id": "atomic_file_io_control_20260921_pending",
+  "authorization_source": "none; this file records a candidate independent authorization only",
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/atomic_file_io_control.pending.json",
+    "sha256": "acc2de068fbbc6270c44bf837a71a4963b28381b9f537b1b03a31785bd269869"
+  },
+  "frozen_task_manifest": {
+    "path": "experiments/experience_value/atomic_file_io_control.tasks.md",
+    "sha256": "55681dc1c8aa66d45c4926eb6932862edf96315d943b240f7a264209044fe6bd"
+  },
+  "study_kind": "engineering_atomic_file_io_control",
+  "included_in_primary_analysis": false,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "max_episodes": 2,
+  "max_provider_requests": 12,
+  "hard_cap_usd": "0.20",
+  "live_requests_authorized": false,
+  "real_model_requests_sent_under_this_authorization": 0,
+  "formal_48_plus_30_batch_authorized": false
+}

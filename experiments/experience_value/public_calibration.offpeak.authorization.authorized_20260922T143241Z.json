@@ -1,0 +1,51 @@
+{
+  "status": "CONSUMED_STOPPED_AFTER_14_COMPLETED_PROVIDER_REQUESTS",
+  "authorization_id": "public_database_exploration_calibration_offpeak_20260922T143241Z_independent",
+  "authorization_source": "user confirmation on 2026-09-22 after successful independently authorized provider connectivity smoke; no reuse of Atomic, smoke, or earlier consumed public calibration authorization",
+  "authorized_at": "2026-09-22T22:32:41+08:00",
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/public_calibration.offpeak.pending.json",
+    "sha256": "3fd187e75defe553df3d99b325b49c65f7c721855b2f5358bfa2132bc311f150"
+  },
+  "frozen_task_manifest": {
+    "path": "experiments/experience_value/public_calibration.tasks.md",
+    "sha256": "be6cb33cfa743d2bad98de52613b9c66e3411b2093c709598ed4fae9474c1b6a"
+  },
+  "entry_code": {
+    "path": "experiments/experience_value/public_calibration_run.py",
+    "sha256": "d7abb667562600dbcd871346267860a33e2d97094d3728f3eac99ba82ec675f4"
+  },
+  "code_dependencies": {
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "live_bridge": "5255e2c1c9db5ed10a6ef78e2cce57e6f47c30c79496e97e206c0bc57b91fee2",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "workspace": "d2998154c834c061367dc2d32def386e6de85d84f5d6f63d3bf2dc7d9646f10f",
+    "records": "93a439ae288582dbc276f9bd48c54d1c8a67a50d79c7a5a2b25e5ae79b96ddb2",
+    "loop": "954101943af7dc159c13bc738dc5237d474bfa11611382bdd8e9f8d1026003f2",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1"
+  },
+  "study_kind": "development_public_calibration",
+  "included_in_primary_analysis": false,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "max_episodes": 6,
+  "max_provider_requests": 144,
+  "hard_cap_usd": "3.00",
+  "offpeak_window": {
+    "timezone": "Asia/Shanghai",
+    "start_local": "18:05:00",
+    "end_local": "08:55:00"
+  },
+  "preflight": {
+    "required_before_provider_client": true,
+    "operations": ["DNS api.deepseek.com", "verified TLS api.deepseek.com:443", "credential-free HEAD /"]
+  },
+  "live_requests_authorized": true,
+  "real_model_requests_sent_under_this_authorization": 14,
+  "paid_evaluator_requests_sent_under_this_authorization": 0,
+  "formal_78_episode_batch_authorized": false,
+  "consumed_at": "2026-09-22T22:35:22+08:00",
+  "consumption_run_id": "e0-3a13efa36d7d478aacfc2da12a50e8db",
+  "consumption_stop_reason": "BudgetError: input character limit reached before provider request in dev-1-u0; 14 started and 14 completed provider responses, no retries, no later episode started"
+}

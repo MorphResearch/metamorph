@@ -1,0 +1,80 @@
+{
+  "status": "AUTHORIZED_BUT_NOT_EXECUTED_CONFIGURATION_MISMATCH",
+  "study_kind": "engineering_positive_control",
+  "included_in_primary_analysis": false,
+  "excluded_from_future_fu_research_samples": true,
+  "authorization": {
+    "authorization_source": "user message: 继续运行",
+    "authorized_at_utc": "2026-09-21T11:18:31Z",
+    "authorization_is_independent": true,
+    "does_not_reuse_prior_authorization_or_unspent_budget": true,
+    "live_requests_authorized_only_if_frozen_configuration_and_positive_control_entry_match": true,
+    "formal_48_plus_30_batch_authorized": false,
+    "real_model_requests_sent_under_this_authorization": 0,
+    "execution_blocked_reason": "No existing PC-SOURCE/PC-MEMORY/PC-EMPTY execution entry is present; the only live entry targets the prior engineering_smoke schema and tasks."
+  },
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/file_positive_control.pending.json",
+    "sha256": "66a5a53c57050d600aa6e8463e34a80628a95a582e01238d2a7aa76a490e7665"
+  },
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env_name_only": "DEEPSEEK_API_KEY",
+  "interface": {
+    "tool_schema_hash": "92b80b1392dae7ea4351ca148b1c3ec20188272cca1601159ce0604f588de0d2",
+    "allowed_tools": ["list_dir", "read_file", "write_file", "query_sql"],
+    "forbidden_capabilities": ["python", "bash", "shell", "eval", "import", "arbitrary_code", "web"],
+    "provider_transcript_path_template": "artifacts/experience_value/<run>/research_records/provider_transcripts.jsonl"
+  },
+  "request": {
+    "thinking_enabled": true,
+    "reasoning_effort": "low",
+    "temperature": null,
+    "max_input_characters": 20480,
+    "max_input_tokens_per_request": 5120,
+    "max_output_tokens_per_request": 512,
+    "timeout_seconds": 30,
+    "automatic_retries": 0,
+    "sdk_implicit_retries": 0,
+    "max_provider_requests_per_episode": 6,
+    "max_tool_calls_per_episode": 6
+  },
+  "episodes": [
+    {
+      "order": 1,
+      "id": "pc_source_optional_filename",
+      "condition": "PC-SOURCE",
+      "initial_memory": "EMPTY",
+      "instruction": "Query the local development SQLite fixture. Save a concise record derived from actual tool feedback under /memory. The model chooses the file name and open content form."
+    },
+    {
+      "order": 2,
+      "id": "pc_probe_memory",
+      "condition": "E*",
+      "initial_memory": "PC_SOURCE_FROZEN_CLONE",
+      "instruction": "Use list_dir on /memory. If a file is present, discover its path and read it. Then use permitted tools to determine the mean observation value for the fixture's coastal cluster. State a number and brief basis."
+    },
+    {
+      "order": 3,
+      "id": "pc_probe_empty",
+      "condition": "E*",
+      "initial_memory": "EMPTY",
+      "instruction": "Use list_dir on /memory. If a file is present, discover its path and read it. Then use permitted tools to determine the mean observation value for the fixture's coastal cluster. State a number and brief basis."
+    }
+  ],
+  "source_failure_rule": "If PC-SOURCE creates no artifact, record POSITIVE_CONTROL_NOT_MET; use its empty frozen snapshot for PC-MEMORY without writing, repairing, or rerunning a source artifact.",
+  "probe_isolation": "Both probes are fresh sessions with independent workspaces. Neither probe writes to the source snapshot or the other probe.",
+  "budget_proposal": {
+    "currency": "USD",
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "price_checked_on": "2026-09-21",
+    "reservation_basis": "The expanded schema remains within the already fixed 5,120-input/512-output per-request ceilings; reserve peak cache-miss input plus peak output for every request.",
+    "input_cache_miss_usd_per_million": "1.32",
+    "output_usd_per_million": "3.96",
+    "worst_case_per_request_usd": "0.00878592",
+    "max_provider_requests": 18,
+    "worst_case_total_usd": "0.15814656",
+    "proposed_hard_cap_usd": "0.20"
+  }
+}

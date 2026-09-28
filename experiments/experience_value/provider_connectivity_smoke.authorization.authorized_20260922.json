@@ -1,0 +1,19 @@
+{
+  "status": "CONSUMED_SUCCESS_AFTER_ONE_PROVIDER_RESPONSE",
+  "authorization_id": "provider_connectivity_smoke_20260922_independent",
+  "authorization_source": "user authorization for one minimal DeepSeek provider smoke; no reuse of Atomic or public calibration authorization",
+  "authorized_at": "2026-09-22T22:17:00+08:00",
+  "pending_path": "experiments/experience_value/provider_connectivity_smoke.pending.json",
+  "pending_sha256": "d8883dde6e475f2ca949cc576dccbf37dbb3a807870af2c6d87a749c56e0696e",
+  "entry_path": "experiments/experience_value/provider_connectivity_smoke_run.py",
+  "entry_sha256": "4696547a055c4fac6e7121d54c506076dad47a042604d2e1b95915b4e094d557",
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "max_provider_requests": 1,
+  "hard_cap_usd": "0.05",
+  "requests_sent": 1,
+  "paid_evaluator_requests_sent": 0,
+  "formal_calibration_authorized": false,
+  "consumed_at": "2026-09-22T22:19:06+08:00",
+  "consumption_run_id": "smoke-20260922T141905Z"
+}

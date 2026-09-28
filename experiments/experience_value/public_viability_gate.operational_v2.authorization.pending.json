@@ -1,0 +1,30 @@
+{
+  "status": "PENDING_PUBLIC_VIABILITY_GATE_OPERATIONAL_V2_USER_SIGNOFF_NO_LIVE_CALLS",
+  "live_requests_authorized": false,
+  "real_model_requests_sent_under_this_authorization": 0,
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/public_viability_gate.operational_v2.pending.json",
+    "sha256": "c995c0bea8baae087e4deb94e8919deecd889cfb0033283b13a3fe5577d3307e"
+  },
+  "task_manifest": {
+    "path": "experiments/experience_value/public_viability_gate.tasks.md",
+    "sha256": "63a759c611c4ea7a267d633572d2ba71b4074340c594fa90de4f7911366d1a8c"
+  },
+  "entry_code": {
+    "path": "experiments/experience_value/public_viability_gate_run.py",
+    "sha256": "8b9839d4983933a599c1f040e8446bf4a6ecf52d3ba9494b5ee67352598c9b66"
+  },
+  "code_dependencies": {
+    "entry": "8b9839d4983933a599c1f040e8446bf4a6ecf52d3ba9494b5ee67352598c9b66",
+    "live_bridge": "0e164db98e136def55a00f41fdd4df136b7f23e4ea638effbc2f43d90d8b05c7",
+    "public_calibration_bridge": "e511df297fc8d6638fa2fcbb5d67f20409bf1c8603350c665ada6d803236c4f1",
+    "loop": "7df080c8a258e7dd32ee3239443c8b217eba52748e6cb69854c21110a7737cce",
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "workspace": "d2998154c834c061367dc2d32def386e6de85d84f5d6f63d3bf2dc7d9646f10f",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "ledger": "5232ca863350de999752142ba878d91b579104f5fc262da2da7757c32d8de238",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1"
+  },
+  "authorization_source": "none; operational wrapper candidate only; no provider requests are authorized"
+}

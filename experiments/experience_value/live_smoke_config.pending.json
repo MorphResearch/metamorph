@@ -1,0 +1,55 @@
+{
+  "status": "PENDING_USER_SIGNOFF_NO_LIVE_CALLS",
+  "study_kind": "engineering_smoke",
+  "included_in_primary_analysis": false,
+  "provider": "deepseek",
+  "exact_model_id": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env_name_only": "DEEPSEEK_API_KEY",
+  "request": {
+    "max_input_characters": 16000,
+    "max_input_tokens_per_request": 4096,
+    "max_output_tokens_per_request": 512,
+    "temperature": 0.0,
+    "timeout_seconds": 20,
+    "automatic_retries": 0,
+    "max_provider_requests_per_episode": 2,
+    "max_tool_calls_per_episode": 2
+  },
+  "scope": {
+    "allowed_tools": ["read_file", "write_file", "query_sql"],
+    "forbidden_capabilities": ["python", "bash", "shell", "eval", "import", "arbitrary_code", "web"],
+    "code_files_are_static_artifacts": true
+  },
+  "episodes": [
+    {"order": 1, "id": "local_fixture_u1_practice_region_cluster", "condition": "U1", "memory": "EMPTY", "role": "source"},
+    {"order": 2, "id": "local_fixture_estimate_coastal_mean", "condition": "E*", "memory": "M_U", "role": "probe"},
+    {"order": 3, "id": "local_fixture_estimate_coastal_mean", "condition": "E*", "memory": "EMPTY", "role": "probe"}
+  ],
+  "budget_proposal": {
+    "currency": "USD",
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "price_checked_on": "2026-09-21",
+    "reservation_basis": "peak cache-miss input plus peak output for every provider request",
+    "input_cache_miss_usd_per_million": "1.32",
+    "output_usd_per_million": "3.96",
+    "worst_case_per_request_usd": "0.00743424",
+    "max_provider_requests": 6,
+    "worst_case_total_usd": "0.04460544",
+    "proposed_hard_cap_usd": "0.05"
+  },
+  "failure_handling": {
+    "no_artifact": "record NO_ARTIFACT_OBSERVED; continue only according to the prewritten three-episode order",
+    "artifact_not_read": "record NOT_CONSUMED; do not repeat or patch the artifact",
+    "empty_probe_succeeds": "record outcome; do not suppress normal SQL access",
+    "unknown_usage_or_billing": "retain reservation and stop later provider calls",
+    "timeout_or_provider_error": "record partial failure; no automatic retry",
+    "fourth_episode": "forbidden"
+  },
+  "authorization": {
+    "user_confirmation_required": true,
+    "paid_batch_authorized": false,
+    "real_model_requests_sent": 0
+  }
+}
+
