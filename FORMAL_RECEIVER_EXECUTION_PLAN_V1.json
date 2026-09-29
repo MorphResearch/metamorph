@@ -1,0 +1,218 @@
+{
+  "episodes": [
+    {
+      "frozen_token": "t15-EMPTY",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 1,
+      "resource_id": "EMPTY"
+    },
+    {
+      "frozen_token": "t15-M_F",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 2,
+      "resource_id": "M_F"
+    },
+    {
+      "frozen_token": "t15-M_U",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 3,
+      "resource_id": "M_U"
+    },
+    {
+      "frozen_token": "t15-RAW_F",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 4,
+      "resource_id": "RAW_F"
+    },
+    {
+      "frozen_token": "t15-RAW_U",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 5,
+      "resource_id": "RAW_U"
+    },
+    {
+      "frozen_token": "t16-M_F",
+      "probe_task_id": 16,
+      "receiver_block_id": "formal_receiver_block_02",
+      "receiver_manifest_position": 6,
+      "resource_id": "M_F"
+    },
+    {
+      "frozen_token": "t16-M_U",
+      "probe_task_id": 16,
+      "receiver_block_id": "formal_receiver_block_02",
+      "receiver_manifest_position": 7,
+      "resource_id": "M_U"
+    },
+    {
+      "frozen_token": "t16-RAW_F",
+      "probe_task_id": 16,
+      "receiver_block_id": "formal_receiver_block_02",
+      "receiver_manifest_position": 8,
+      "resource_id": "RAW_F"
+    },
+    {
+      "frozen_token": "t16-RAW_U",
+      "probe_task_id": 16,
+      "receiver_block_id": "formal_receiver_block_02",
+      "receiver_manifest_position": 9,
+      "resource_id": "RAW_U"
+    },
+    {
+      "frozen_token": "t16-EMPTY",
+      "probe_task_id": 16,
+      "receiver_block_id": "formal_receiver_block_02",
+      "receiver_manifest_position": 10,
+      "resource_id": "EMPTY"
+    },
+    {
+      "frozen_token": "t17-M_U",
+      "probe_task_id": 17,
+      "receiver_block_id": "formal_receiver_block_03",
+      "receiver_manifest_position": 11,
+      "resource_id": "M_U"
+    },
+    {
+      "frozen_token": "t17-RAW_F",
+      "probe_task_id": 17,
+      "receiver_block_id": "formal_receiver_block_03",
+      "receiver_manifest_position": 12,
+      "resource_id": "RAW_F"
+    },
+    {
+      "frozen_token": "t17-RAW_U",
+      "probe_task_id": 17,
+      "receiver_block_id": "formal_receiver_block_03",
+      "receiver_manifest_position": 13,
+      "resource_id": "RAW_U"
+    },
+    {
+      "frozen_token": "t17-EMPTY",
+      "probe_task_id": 17,
+      "receiver_block_id": "formal_receiver_block_03",
+      "receiver_manifest_position": 14,
+      "resource_id": "EMPTY"
+    },
+    {
+      "frozen_token": "t17-M_F",
+      "probe_task_id": 17,
+      "receiver_block_id": "formal_receiver_block_03",
+      "receiver_manifest_position": 15,
+      "resource_id": "M_F"
+    },
+    {
+      "frozen_token": "t18-RAW_F",
+      "probe_task_id": 18,
+      "receiver_block_id": "formal_receiver_block_04",
+      "receiver_manifest_position": 16,
+      "resource_id": "RAW_F"
+    },
+    {
+      "frozen_token": "t18-RAW_U",
+      "probe_task_id": 18,
+      "receiver_block_id": "formal_receiver_block_04",
+      "receiver_manifest_position": 17,
+      "resource_id": "RAW_U"
+    },
+    {
+      "frozen_token": "t18-EMPTY",
+      "probe_task_id": 18,
+      "receiver_block_id": "formal_receiver_block_04",
+      "receiver_manifest_position": 18,
+      "resource_id": "EMPTY"
+    },
+    {
+      "frozen_token": "t18-M_F",
+      "probe_task_id": 18,
+      "receiver_block_id": "formal_receiver_block_04",
+      "receiver_manifest_position": 19,
+      "resource_id": "M_F"
+    },
+    {
+      "frozen_token": "t18-M_U",
+      "probe_task_id": 18,
+      "receiver_block_id": "formal_receiver_block_04",
+      "receiver_manifest_position": 20,
+      "resource_id": "M_U"
+    },
+    {
+      "frozen_token": "t19-RAW_U",
+      "probe_task_id": 19,
+      "receiver_block_id": "formal_receiver_block_05",
+      "receiver_manifest_position": 21,
+      "resource_id": "RAW_U"
+    },
+    {
+      "frozen_token": "t19-EMPTY",
+      "probe_task_id": 19,
+      "receiver_block_id": "formal_receiver_block_05",
+      "receiver_manifest_position": 22,
+      "resource_id": "EMPTY"
+    },
+    {
+      "frozen_token": "t19-M_F",
+      "probe_task_id": 19,
+      "receiver_block_id": "formal_receiver_block_05",
+      "receiver_manifest_position": 23,
+      "resource_id": "M_F"
+    },
+    {
+      "frozen_token": "t19-M_U",
+      "probe_task_id": 19,
+      "receiver_block_id": "formal_receiver_block_05",
+      "receiver_manifest_position": 24,
+      "resource_id": "M_U"
+    },
+    {
+      "frozen_token": "t19-RAW_F",
+      "probe_task_id": 19,
+      "receiver_block_id": "formal_receiver_block_05",
+      "receiver_manifest_position": 25,
+      "resource_id": "RAW_F"
+    },
+    {
+      "frozen_token": "t20-EMPTY",
+      "probe_task_id": 20,
+      "receiver_block_id": "formal_receiver_block_06",
+      "receiver_manifest_position": 26,
+      "resource_id": "EMPTY"
+    },
+    {
+      "frozen_token": "t20-M_F",
+      "probe_task_id": 20,
+      "receiver_block_id": "formal_receiver_block_06",
+      "receiver_manifest_position": 27,
+      "resource_id": "M_F"
+    },
+    {
+      "frozen_token": "t20-M_U",
+      "probe_task_id": 20,
+      "receiver_block_id": "formal_receiver_block_06",
+      "receiver_manifest_position": 28,
+      "resource_id": "M_U"
+    },
+    {
+      "frozen_token": "t20-RAW_F",
+      "probe_task_id": 20,
+      "receiver_block_id": "formal_receiver_block_06",
+      "receiver_manifest_position": 29,
+      "resource_id": "RAW_F"
+    },
+    {
+      "frozen_token": "t20-RAW_U",
+      "probe_task_id": 20,
+      "receiver_block_id": "formal_receiver_block_06",
+      "receiver_manifest_position": 30,
+      "resource_id": "RAW_U"
+    }
+  ],
+  "format": "FORMAL_RECEIVER_EXECUTION_PLAN_V1",
+  "probe_content_read": false,
+  "provider_requests": 0,
+  "source_manifest_sha256": "6a6ed3b22aebc5b0bace7bd06c73c54892f3d6e951005115d40ca047ea0d11a2"
+}

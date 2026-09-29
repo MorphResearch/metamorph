@@ -1,0 +1,119 @@
+{
+  "authorization_source": "user authorization: Formal Source Block 8 only, 2026-09-28",
+  "authorized_at": "2026-09-28T22:55:34+08:00",
+  "block_definition": {
+    "allowed_manifest_positions": [
+      29,
+      30,
+      31,
+      32
+    ],
+    "allowed_tokens": [
+      "t14-U1",
+      "t14-F0",
+      "t14-U0",
+      "t14-F1"
+    ],
+    "block_id": "formal_source_block_08",
+    "next_position_not_authorized": null,
+    "path": "FORMAL_SOURCE_BLOCKS_V1.json",
+    "sha256": "c54f6efabffad684c9612833a3151f6a2d60bec21dd75735ec394235fd24949a"
+  },
+  "code_dependencies": {
+    "entry": "168857fbb58d1566cfdc6ee780dca17c85f001d23f77aaccef7f995931c015cd",
+    "ledger": "5232ca863350de999752142ba878d91b579104f5fc262da2da7757c32d8de238",
+    "live_bridge": "0573543a1b24f568e918c9e8fcf9cc54ff361af927c299383147efd79f4858dc",
+    "loop": "220718303d4c570e373e108befa908f3978212650de393494193be58595fc5f0",
+    "provider_adapter": "281b476c3c2ded823c957e51426d6e403de5baa709de12ce14bd960f0a9db48e",
+    "provider_client": "3581626cb08cc51933c831e59b4671e12efe72a45d92a0f59878080a2c7e46f1",
+    "public_adapter": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52",
+    "public_calibration_bridge": "e511df297fc8d6638fa2fcbb5d67f20409bf1c8603350c665ada6d803236c4f1",
+    "runner": "1920f3342e158476e081e33aa9f7715411abc934eaaf24ad357c6877e74a31c5",
+    "workspace": "8c46ac35f5b17acf0b1965604feda4933ea1a832112588d5c9b99fcbdee0f82b"
+  },
+  "consumed_at": "2026-09-28T15:00:05.152232+00:00",
+  "consumption_run_id": "e0-915ba68f669343ecb1f1cad12f738881",
+  "currency": "USD",
+  "development_exclusion": {
+    "development_objects_may_mount": false,
+    "task_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  },
+  "entry_code": {
+    "path": "experiments/experience_value/formal_source_run_v3.py",
+    "sha256": "168857fbb58d1566cfdc6ee780dca17c85f001d23f77aaccef7f995931c015cd"
+  },
+  "formal_protocol": {
+    "path": "FORMAL_EXPERIMENT_PROTOCOL_V1.md",
+    "scientific_diff": "NONE",
+    "sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450"
+  },
+  "frozen_pending_config": {
+    "path": "experiments/experience_value/formal_source_block_08.pending.json",
+    "sha256": "df235218b9b0e591108f23b4f71381615410b47fed73b1c6f8bd4d83658815e3"
+  },
+  "hard_cap_usd": "7.00",
+  "included_in_primary_analysis": true,
+  "live_requests_authorized": true,
+  "not_authorized": [
+    "any extra source episode; position 33 does not exist",
+    "formal receiver",
+    "calibration",
+    "viability",
+    "smoke requests",
+    "development tasks"
+  ],
+  "offpeak_timezone": "Asia/Shanghai",
+  "offpeak_window": "18:05-08:55",
+  "real_model_requests_sent_under_this_authorization": 1,
+  "required_predecessors": {
+    "formal-t14-f1": {
+      "artifact_path": "/memory/experience_007.md",
+      "artifact_sha256": "f5ba77c58c255b9c56b3985cf2ef58539e79faaa67df37b904ab7d5cc4d4ea6e",
+      "authorization_path": "experiments/experience_value/formal_source_block_07.authorization.authorized_20260928T224139+0800.json",
+      "condition": "F1",
+      "episode_id": "formal-t13-f1",
+      "formal_protocol_sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450",
+      "included_in_primary_analysis": true,
+      "operational_case": "A",
+      "predecessor_token": "t13-F1",
+      "record_path": "artifacts/experience_value/formal_source/e0-3298ad04692e43a99ebcb57ba71ccb48/research_records/formal_source_block_run.json",
+      "run_id": "e0-3298ad04692e43a99ebcb57ba71ccb48",
+      "snapshot_hash": "175969862eb9a2370bfdfd392f19f94078d2fb675b405ea90f6caab23a52503c",
+      "snapshot_id": "snapshot-ac03888be0f7466b9f1be44b82d4267b",
+      "source_manifest_sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e",
+      "study_kind": "formal_source_v1",
+      "task_id": 13
+    },
+    "formal-t14-u1": {
+      "artifact_path": "/memory/experience_007.md",
+      "artifact_sha256": "7697b29037f7759f44562c5384f771227c36a596c4500da0735786f8f3ae358e",
+      "authorization_path": "experiments/experience_value/formal_source_block_07.authorization.authorized_20260928T224139+0800.json",
+      "condition": "U1",
+      "episode_id": "formal-t13-u1",
+      "formal_protocol_sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450",
+      "included_in_primary_analysis": true,
+      "operational_case": "A",
+      "predecessor_token": "t13-U1",
+      "record_path": "artifacts/experience_value/formal_source/e0-3298ad04692e43a99ebcb57ba71ccb48/research_records/formal_source_block_run.json",
+      "run_id": "e0-3298ad04692e43a99ebcb57ba71ccb48",
+      "snapshot_hash": "678cd73dfcde7dd766f3b76142c5153f8bdfa092b9980094f8c446b39a7d9d08",
+      "snapshot_id": "snapshot-2d99165456a041c1aa550a8aa6810ddb",
+      "source_manifest_sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e",
+      "study_kind": "formal_source_v1",
+      "task_id": 13
+    }
+  },
+  "source_manifest": {
+    "path": "FORMAL_SOURCE_MANIFEST_V1.json",
+    "sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e"
+  },
+  "status": "CONSUMED_FORMAL_SOURCE_BLOCK_08",
+  "study_kind": "formal_source_v1"
+}

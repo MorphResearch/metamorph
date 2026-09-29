@@ -1,0 +1,106 @@
+{
+  "allowed_manifest_positions": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "allowed_tokens": [
+    "t15-EMPTY",
+    "t15-M_F",
+    "t15-M_U",
+    "t15-RAW_F",
+    "t15-RAW_U"
+  ],
+  "bindings": {
+    "addendum": {
+      "path": "FORMAL_RECEIVER_PROTOCOL_ADDENDUM_V1.json",
+      "sha256": "8f12f81a7c23986a8940bb4cacb046dd11f1e9a0b42afd2a84bb3472f4a59fdf"
+    },
+    "addendum_seal": {
+      "path": "FORMAL_RECEIVER_PROTOCOL_ADDENDUM_V1_SEAL.json",
+      "sha256": "207a2d2071d24c7bff9466bddb41ee443f6030d59e63f0df23b8dcd14be43a48"
+    },
+    "analysis_plan": {
+      "path": "FORMAL_ANALYSIS_PLAN_V1.md",
+      "sha256": "eb5628ead51537fe6fc3f12ec6a132f3c4c86f284f14065d2ed6a139ca955f74"
+    },
+    "block_definition": {
+      "path": "FORMAL_RECEIVER_BLOCKS_V1.json",
+      "sha256": "0440bc8b9c93ba4427bc8b718d2a08a2224a5c22894dbfecabdabe3eeef269cc"
+    },
+    "execution_plan": {
+      "path": "FORMAL_RECEIVER_EXECUTION_PLAN_V1.json",
+      "sha256": "477ba457795d696e95d198276a94d5e6ee8e972d225dabada9d14e2c31b588bb"
+    },
+    "formal_protocol": {
+      "path": "FORMAL_EXPERIMENT_PROTOCOL_V1.md",
+      "sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450"
+    },
+    "receiver_manifest": {
+      "path": "FORMAL_RECEIVER_MANIFEST_V1.json",
+      "sha256": "6a6ed3b22aebc5b0bace7bd06c73c54892f3d6e951005115d40ca047ea0d11a2"
+    },
+    "resource_manifest": {
+      "canonical_sha256": "6ea6e4b1054f387a394ab2c3c2e71a0ca93a2b7f1235444b1a6a72589a6d96bf",
+      "path": "artifacts/experience_value/formal_receiver_resources_v1/FORMAL_RECEIVER_RESOURCES_V1.json"
+    },
+    "source_seal": {
+      "canonical_sha256": "f6a1ca4f44a5f0d6720ace90b8634b11d5e03b9025e715ca364fcb52fa100d46",
+      "path": "artifacts/experience_value/formal_freeze/FORMAL_SOURCE_PHASE_SEAL_V1.json"
+    }
+  },
+  "block_id": "formal_receiver_block_01",
+  "entry_code": {
+    "path": "experiments/experience_value/formal_receiver_run_v2.py",
+    "sha256": "a8c6a0bfdb4299cbd59e4d78a9c8be47a32367798e26c154080b42e16f63a252"
+  },
+  "episodes": [
+    {
+      "frozen_token": "t15-EMPTY",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 1,
+      "resource_id": "EMPTY"
+    },
+    {
+      "frozen_token": "t15-M_F",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 2,
+      "resource_id": "M_F"
+    },
+    {
+      "frozen_token": "t15-M_U",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 3,
+      "resource_id": "M_U"
+    },
+    {
+      "frozen_token": "t15-RAW_F",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 4,
+      "resource_id": "RAW_F"
+    },
+    {
+      "frozen_token": "t15-RAW_U",
+      "probe_task_id": 15,
+      "receiver_block_id": "formal_receiver_block_01",
+      "receiver_manifest_position": 5,
+      "resource_id": "RAW_U"
+    }
+  ],
+  "evaluator_calls": 0,
+  "five_episode_worst_case_reservation_usd": "7.69443840",
+  "hard_cap_usd": "8.00",
+  "live_requests_authorized": false,
+  "probe_content_read": false,
+  "provider_requests": 0,
+  "runner_scientific_diff_from_sealed_receiver_protocol": "NONE",
+  "status": "PENDING_FORMAL_RECEIVER_BLOCK_R1_V2_USER_SIGNOFF_NO_LIVE_CALLS",
+  "study_kind": "formal_receiver_v1",
+  "tool_schema_canonical_sha256": "cb9348286035ae1db212e0d5f737b3ced1ede25d7691c709f1cb0d2a914da4ce"
+}

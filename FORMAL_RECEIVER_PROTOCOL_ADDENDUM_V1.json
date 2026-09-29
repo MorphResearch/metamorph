@@ -1,0 +1,524 @@
+{
+  "authoritative_source_execution": {
+    "final_formal_source_authorization": {
+      "path": "experiments/experience_value/formal_source_block_08.authorization.authorized_20260928T225534+0800.json",
+      "runner_version": "V3",
+      "sha256": "2e92e121038b4fe57cdf4add1b1b428ca36c800ec8c330c4574377cdd5b02fc8"
+    },
+    "formal_execution_config": {
+      "path": "experiments/experience_value/public_formal_experiment_v1.pending.json",
+      "sha256": "8a6f3664c8668b73f976d290afe101e1e6de17662f0e3e6def04900e776c221c"
+    },
+    "public_calibration_bridge": {
+      "path": "experiments/experience_value/public_calibration_run.py",
+      "sha256": "e511df297fc8d6638fa2fcbb5d67f20409bf1c8603350c665ada6d803236c4f1"
+    },
+    "public_database_adapter": {
+      "path": "experiments/experience_value/clbench_database_exploration.py",
+      "sha256": "efc6ee515af01da0f8ebbf5e23dc259a4a35ba9f3658e4725d085c7ed44c8a52"
+    },
+    "shared_live_bridge": {
+      "path": "experiments/experience_value/live.py",
+      "sha256": "0573543a1b24f568e918c9e8fcf9cc54ff361af927c299383147efd79f4858dc"
+    },
+    "shared_terminal_loop": {
+      "path": "graphs/loop.py",
+      "sha256": "220718303d4c570e373e108befa908f3978212650de393494193be58595fc5f0"
+    },
+    "source_operational_pricing_config": {
+      "path": "experiments/experience_value/formal_source_block_08.pending.json",
+      "sha256": "df235218b9b0e591108f23b4f71381615410b47fed73b1c6f8bd4d83658815e3"
+    },
+    "source_v2_common_runner": {
+      "path": "experiments/experience_value/formal_source_run_v2.py",
+      "sha256": "c3625f2ebf148de45e42facd2aa36f5bd537d6f505360ae93eb9f9a097a7efa9"
+    },
+    "source_v3_entry": {
+      "path": "experiments/experience_value/formal_source_run_v3.py",
+      "sha256": "168857fbb58d1566cfdc6ee780dca17c85f001d23f77aaccef7f995931c015cd"
+    },
+    "workspace_policy": {
+      "path": "experiments/experience_value/workspace.py",
+      "sha256": "8c46ac35f5b17acf0b1965604feda4933ea1a832112588d5c9b99fcbdee0f82b"
+    }
+  },
+  "canonical_content_sha256": "96b033729af9768b6a5ebe6fe2c2a1436f13270161b8f2370dc2b3a7960c95e7",
+  "common_receiver": {
+    "agent_visible_resource_label_injected": false,
+    "all_conditions_identical_except_starting_frozen_resource_content": true,
+    "conditions": [
+      "EMPTY",
+      "M_F",
+      "M_U",
+      "RAW_F",
+      "RAW_U"
+    ],
+    "consolidation": {
+      "enabled": false,
+      "post_evaluation_model_call": false,
+      "receiver_inheritance": false
+    },
+    "model": "deepseek-v4-pro",
+    "reasoning_effort": "low",
+    "receiver_prompt_exact": "Complete the current task using the same /memory and /work file interface.",
+    "scalar_budgets": {
+      "consolidation_enabled": false,
+      "episode_timeout_seconds": 1080,
+      "max_file_operations": 8,
+      "max_input_tokens_per_request": 24000,
+      "max_main_model_decisions": 24,
+      "max_output_tokens_per_request": 8192,
+      "max_pre_response_transport_retries": 1,
+      "max_query_sql": 15,
+      "model": "deepseek-v4-pro",
+      "reasoning_effort": "low",
+      "request_timeout_seconds": 120,
+      "sdk_retries": 0,
+      "task_model_retries": 0,
+      "thinking_enabled": true
+    },
+    "thinking_enabled": true
+  },
+  "completion_context": {
+    "performance_tuning": false,
+    "probe_outcomes_observed": false,
+    "receiver_outcomes_observed_before_completion": false,
+    "receiver_protocol_completion_before_execution": true,
+    "selection_rule": "For receiver execution semantics not explicit in the original receiver manifest, bind the formally executed Formal Source V1 common mechanism unless the receiver manifest explicitly differs.",
+    "source_protocol_changed": false,
+    "source_results_changed": false
+  },
+  "cost_accounting": {
+    "billing_unknown": "safe block stop; never hidden or converted to known cost",
+    "currency": "USD",
+    "five_episode_block_worst_case_usd": "7.69443840",
+    "hard_cap_derivation": "ceil_to_next_whole_USD(frozen five-episode worst-case reservation)",
+    "input_cache_hit_usd_per_million": "0.022",
+    "input_cache_miss_usd_per_million": "0.66",
+    "known_cost": "provider usage settled using the bound PriceSheet",
+    "logical_decisions_per_receiver_episode": 24,
+    "maximum_provider_attempts_per_receiver_episode": 48,
+    "output_usd_per_million": "1.98",
+    "per_attempt_worst_case_usd": "0.03206016",
+    "per_block_hard_cap_usd": "8.00",
+    "price_checked_on": "2026-09-27",
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "reservation_formula": "(max_input_tokens_per_request * input_cache_miss_usd_per_million + max_output_tokens_per_request * output_usd_per_million) / 1_000_000",
+    "shared_cross_block_hard_cap": null,
+    "thirty_episode_worst_case_usd": "46.16663040",
+    "transport_retry": "one identical pre-response transport retry only; failed and retry attempts remain accounted"
+  },
+  "formal_input_cutoff": {
+    "character_count_is_formal_cutoff": false,
+    "diagnostic_estimator": {
+      "name": "calibrated_utf8_half_bytes_plus_chat_tool_overhead_v1",
+      "version": "1"
+    },
+    "formal_estimator": {
+      "calibration_binding": "final_v3:46_completed_provider_prompt_token_observations; scores_and_condition_outcomes_excluded",
+      "formula": "ceil(diagnostic_estimated_tokens * 0.50) + 256",
+      "name": "deepseek_prompt_usage_calibrated_v1",
+      "version": "1"
+    },
+    "pre_dispatch_stop": "formal_estimate >= 24000",
+    "receiver_recalibration": false
+  },
+  "format": "FORMAL_RECEIVER_PROTOCOL_ADDENDUM_V1",
+  "immutable": true,
+  "native_evaluator_contract": {
+    "agent_visible_destinations_excluded": [
+      "messages",
+      "provider transcript visible feedback",
+      "/memory",
+      "/work",
+      "receiver resource",
+      "follow-up model request"
+    ],
+    "consolidation": false,
+    "evaluator_failure": {
+      "classification": "INVALID_SYSTEM unless the existing frozen failure classifier establishes INVALID_INFRA",
+      "native_score_imputed": false
+    },
+    "evaluator_or_reference_visible_to_agent": false,
+    "implementation": "DatabaseExplorationAdapter.evaluate_native",
+    "maximum_evaluations_per_episode": 1,
+    "no_accepted_answer": {
+      "evaluator_invoked": false,
+      "native_score_imputed": false
+    },
+    "only_after_accepted_native_answer": true,
+    "post_evaluation_model_call": false,
+    "recorded_fields": [
+      "correct",
+      "native_accuracy",
+      "native_score"
+    ],
+    "upstream_semantics_preserved": true
+  },
+  "operational_blocks": {
+    "blocks": [
+      {
+        "automatically_starts_next_block": false,
+        "block_id": "formal_receiver_block_01",
+        "episode_count": 5,
+        "execution_tokens": [
+          "t15-EMPTY",
+          "t15-M_F",
+          "t15-M_U",
+          "t15-RAW_F",
+          "t15-RAW_U"
+        ],
+        "hard_cap_usd": "8.00",
+        "manifest_positions": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "probe_task_id": 15
+      },
+      {
+        "automatically_starts_next_block": false,
+        "block_id": "formal_receiver_block_02",
+        "episode_count": 5,
+        "execution_tokens": [
+          "t16-M_F",
+          "t16-M_U",
+          "t16-RAW_F",
+          "t16-RAW_U",
+          "t16-EMPTY"
+        ],
+        "hard_cap_usd": "8.00",
+        "manifest_positions": [
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        "probe_task_id": 16
+      },
+      {
+        "automatically_starts_next_block": false,
+        "block_id": "formal_receiver_block_03",
+        "episode_count": 5,
+        "execution_tokens": [
+          "t17-M_U",
+          "t17-RAW_F",
+          "t17-RAW_U",
+          "t17-EMPTY",
+          "t17-M_F"
+        ],
+        "hard_cap_usd": "8.00",
+        "manifest_positions": [
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "probe_task_id": 17
+      },
+      {
+        "automatically_starts_next_block": false,
+        "block_id": "formal_receiver_block_04",
+        "episode_count": 5,
+        "execution_tokens": [
+          "t18-RAW_F",
+          "t18-RAW_U",
+          "t18-EMPTY",
+          "t18-M_F",
+          "t18-M_U"
+        ],
+        "hard_cap_usd": "8.00",
+        "manifest_positions": [
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "probe_task_id": 18
+      },
+      {
+        "automatically_starts_next_block": false,
+        "block_id": "formal_receiver_block_05",
+        "episode_count": 5,
+        "execution_tokens": [
+          "t19-RAW_U",
+          "t19-EMPTY",
+          "t19-M_F",
+          "t19-M_U",
+          "t19-RAW_F"
+        ],
+        "hard_cap_usd": "8.00",
+        "manifest_positions": [
+          21,
+          22,
+          23,
+          24,
+          25
+        ],
+        "probe_task_id": 19
+      },
+      {
+        "automatically_starts_next_block": false,
+        "block_id": "formal_receiver_block_06",
+        "episode_count": 5,
+        "execution_tokens": [
+          "t20-EMPTY",
+          "t20-M_F",
+          "t20-M_U",
+          "t20-RAW_F",
+          "t20-RAW_U"
+        ],
+        "hard_cap_usd": "8.00",
+        "manifest_positions": [
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "probe_task_id": 20
+      }
+    ],
+    "purpose": "independent authorization and stopping only",
+    "scientific_content_change": false
+  },
+  "original_bindings": {
+    "analysis_plan": {
+      "path": "FORMAL_ANALYSIS_PLAN_V1.md",
+      "sha256": "eb5628ead51537fe6fc3f12ec6a132f3c4c86f284f14065d2ed6a139ca955f74"
+    },
+    "formal_protocol": {
+      "path": "FORMAL_EXPERIMENT_PROTOCOL_V1.md",
+      "sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450"
+    },
+    "receiver_manifest": {
+      "path": "FORMAL_RECEIVER_MANIFEST_V1.json",
+      "sha256": "6a6ed3b22aebc5b0bace7bd06c73c54892f3d6e951005115d40ca047ea0d11a2"
+    },
+    "receiver_resource_manifest": {
+      "canonical_sha256": "6ea6e4b1054f387a394ab2c3c2e71a0ca93a2b7f1235444b1a6a72589a6d96bf",
+      "path": "artifacts/experience_value/formal_receiver_resources_v1/FORMAL_RECEIVER_RESOURCES_V1.json"
+    },
+    "source_phase_seal": {
+      "canonical_sha256": "f6a1ca4f44a5f0d6720ace90b8634b11d5e03b9025e715ca364fcb52fa100d46",
+      "path": "artifacts/experience_value/formal_freeze/FORMAL_SOURCE_PHASE_SEAL_V1.json"
+    }
+  },
+  "receiver_protocol_status": "COMPLETED_PRE_EXECUTION_BY_ADDENDUM",
+  "receiver_resources": {
+    "EMPTY": {
+      "agent_visible_helper_files": false,
+      "starting_memory": "empty"
+    },
+    "M_F": {
+      "clone": "byte-identical episode-local clone",
+      "materialized_path": "artifacts/experience_value/formal_receiver_resources_v1/M_F",
+      "tree_sha256": "2c5f05ac705b9e36489a479fd657b38c95e41fc949fbc5f3981b37db1d702348"
+    },
+    "M_U": {
+      "clone": "byte-identical episode-local clone",
+      "experience_006_present": false,
+      "materialized_path": "artifacts/experience_value/formal_receiver_resources_v1/M_U",
+      "tree_sha256": "633d26c5badb50d5e7ae9d1626f1181fac7f98279bf787f2bb122dce8015fd50"
+    },
+    "RAW_F": {
+      "materialized_path": "artifacts/experience_value/formal_receiver_resources_v1/RAW_F/raw_f.txt",
+      "mount_path": "/memory/raw_f.txt",
+      "parser_or_reserialization": false,
+      "payload_sha256": "0c8de1725a907eff3f7bf80ced429b2dacd3247e9e26f90c8efa012ee1288da3",
+      "tree_sha256": "3e2853a777c7522c37ab2efe4fed015bcc5b7ba09b6b4b2ea3bb05fd93cb0a45"
+    },
+    "RAW_U": {
+      "materialized_path": "artifacts/experience_value/formal_receiver_resources_v1/RAW_U/raw_u.txt",
+      "mount_path": "/memory/raw_u.txt",
+      "parser_or_reserialization": false,
+      "payload_sha256": "62a8baa1e801c2c4dfe72d77291330881623b2a0a39414f7c371ebddf9cb08e1",
+      "tree_sha256": "17ae18e9fc8923dd95b004f920c47163c8deb4264d2a1429239ebbcff6f95b3a"
+    },
+    "resource_use_metrics": [
+      "resource_existed",
+      "resource_mounted_path",
+      "list_dir_proposed_dispatched",
+      "read_file_proposed_dispatched",
+      "resource_content_entered_model_context",
+      "source_paths_read"
+    ]
+  },
+  "static_validation": {
+    "evaluator_calls": 0,
+    "probe_content_read": false,
+    "provider_requests": 0,
+    "receiver_started": false,
+    "source_resources_modified": false,
+    "source_seal_modified": false
+  },
+  "terminal_answer": {
+    "decision_exhaustion": {
+      "additional_model_request": false,
+      "stop_reason": "terminal_answer_unavailable_model_decision_budget_reached",
+      "when": "fifteenth legal query_sql occurs at decision 24"
+    },
+    "ordinary_completion": {
+      "answer_type": "ordinary visible text",
+      "finalization_retry": false,
+      "maximum_native_answer_submissions": 1,
+      "when": "a model decision has no dispatched or budget-rejected tool calls"
+    },
+    "other_resource_stops": {
+      "rescue_or_final_answer_call": false,
+      "source_stop_semantics_reused": true
+    },
+    "sql_cap_terminal_path": {
+      "additional_terminal_only_decisions": 1,
+      "empty_text_stop_reason": "terminal_only_empty_answer",
+      "native_sql_allowance": 15,
+      "requires_main_decisions_used_less_than": 24,
+      "sixteenth_sql": false,
+      "terminal_decision_counts_within_main_limit": true,
+      "terminal_tools": [],
+      "tool_call_proposal": "rejected and never dispatched",
+      "tool_call_stop_reason": "terminal_only_tool_call_rejected",
+      "trigger": "after fifteenth legal query_sql feedback"
+    }
+  },
+  "tool_interface": {
+    "allowlist": [
+      "list_dir",
+      "read_file",
+      "write_file",
+      "query_sql"
+    ],
+    "canonical_serialized_schema_sha256": "cb9348286035ae1db212e0d5f737b3ced1ede25d7691c709f1cb0d2a914da4ce",
+    "file_operation_accounting": {
+      "independent_of_native_sql_budget": true,
+      "limit": 8,
+      "members": [
+        "list_dir",
+        "read_file",
+        "write_file"
+      ]
+    },
+    "forbidden_capabilities": [
+      "python",
+      "bash",
+      "shell",
+      "eval",
+      "import",
+      "arbitrary_code",
+      "web"
+    ],
+    "logical_path_policy": {
+      "allowed_roots": [
+        "/memory",
+        "/work"
+      ],
+      "non_regular_files": "rejected",
+      "path_escape": "rejected",
+      "symlinks": "rejected"
+    },
+    "receiver_local_writes": {
+      "allowed_locations": [
+        "/memory",
+        "/work"
+      ],
+      "cross_episode_propagation": false,
+      "existing_inherited_memory_files": "immutable; overwrite rejected",
+      "frozen_resource_mutable": false,
+      "new_episode_local_files": "allowed subject to source path policy",
+      "write_file_allowed": true
+    },
+    "rejected_tool_calls": "recorded, paired with visible rejection feedback, not dispatched, and do not consume tool-call units",
+    "schema_canonicalization": "UTF-8 JSON; ensure_ascii=false; sort_keys=true; separators=(',', ':')",
+    "schemas": [
+      {
+        "function": {
+          "description": "List names and types directly below a logical /memory or /work directory; file contents are never read.",
+          "name": "list_dir",
+          "parameters": {
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Read a UTF-8 file beneath the logical /memory or /work path.",
+          "name": "read_file",
+          "parameters": {
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Write UTF-8 data beneath the logical /memory or /work path.",
+          "name": "write_file",
+          "parameters": {
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "content"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      },
+      {
+        "function": {
+          "description": "Run exactly one metered, read-only SELECT query against the task database.",
+          "name": "query_sql",
+          "parameters": {
+            "properties": {
+              "sql": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sql"
+            ],
+            "type": "object"
+          }
+        },
+        "type": "function"
+      }
+    ],
+    "source_runtime_serialized_schema_sha256": "92b80b1392dae7ea4351ca148b1c3ec20188272cca1601159ce0604f588de0d2",
+    "sql_policy": {
+      "limit": 15,
+      "metered_native_QUERY": true,
+      "read_only_SELECT": true,
+      "semicolon_rejected": true,
+      "tool": "query_sql"
+    }
+  }
+}

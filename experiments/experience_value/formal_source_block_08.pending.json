@@ -1,0 +1,19 @@
+{
+  "block_definition": {"path": "FORMAL_SOURCE_BLOCKS_V1.json", "sha256": "c54f6efabffad684c9612833a3151f6a2d60bec21dd75735ec394235fd24949a"},
+  "block_id": "formal_source_block_08",
+  "budget": {"currency": "USD", "hard_cap_usd": "7.00", "input_cache_hit_usd_per_million": "0.022", "input_cache_miss_usd_per_million": "0.66", "max_provider_attempts": 200, "output_usd_per_million": "1.98", "price_checked_on": "2026-09-27", "price_source": "https://api-docs.deepseek.com/quick_start/pricing/", "worst_case_block_usd": "6.41203200", "worst_case_per_attempt_usd": "0.03206016"},
+  "development_exclusion": {"forbidden_objects": ["calibration", "viability", "development artifacts", "development RAW", "development snapshots"], "ids": [1, 2, 3, 4, 5, 6]},
+  "formal_pending": {"path": "experiments/experience_value/public_formal_experiment_v1.pending.json", "sha256": "8a6f3664c8668b73f976d290afe101e1e6de17662f0e3e6def04900e776c221c"},
+  "formal_protocol": {"path": "FORMAL_EXPERIMENT_PROTOCOL_V1.md", "sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450"},
+  "included_in_primary_analysis": true,
+  "live_requests_authorized": false,
+  "model": "deepseek-v4-pro",
+  "predecessor_references": {
+    "formal-t14-f1": {"artifact_path": "/memory/experience_007.md", "artifact_sha256": "f5ba77c58c255b9c56b3985cf2ef58539e79faaa67df37b904ab7d5cc4d4ea6e", "authorization_path": "experiments/experience_value/formal_source_block_07.authorization.authorized_20260928T224139+0800.json", "condition": "F1", "episode_id": "formal-t13-f1", "formal_protocol_sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450", "included_in_primary_analysis": true, "operational_case": "A", "predecessor_token": "t13-F1", "record_path": "artifacts/experience_value/formal_source/e0-3298ad04692e43a99ebcb57ba71ccb48/research_records/formal_source_block_run.json", "run_id": "e0-3298ad04692e43a99ebcb57ba71ccb48", "snapshot_hash": "175969862eb9a2370bfdfd392f19f94078d2fb675b405ea90f6caab23a52503c", "snapshot_id": "snapshot-ac03888be0f7466b9f1be44b82d4267b", "source_manifest_sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e", "study_kind": "formal_source_v1", "task_id": 13},
+    "formal-t14-u1": {"artifact_path": "/memory/experience_007.md", "artifact_sha256": "7697b29037f7759f44562c5384f771227c36a596c4500da0735786f8f3ae358e", "authorization_path": "experiments/experience_value/formal_source_block_07.authorization.authorized_20260928T224139+0800.json", "condition": "U1", "episode_id": "formal-t13-u1", "formal_protocol_sha256": "ef157008c669b93bdfcffc1579cea4275349916079a6ab2945c10fd3c82b3450", "included_in_primary_analysis": true, "operational_case": "A", "predecessor_token": "t13-U1", "record_path": "artifacts/experience_value/formal_source/e0-3298ad04692e43a99ebcb57ba71ccb48/research_records/formal_source_block_run.json", "run_id": "e0-3298ad04692e43a99ebcb57ba71ccb48", "snapshot_hash": "678cd73dfcde7dd766f3b76142c5153f8bdfa092b9980094f8c446b39a7d9d08", "snapshot_id": "snapshot-2d99165456a041c1aa550a8aa6810ddb", "source_manifest_sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e", "study_kind": "formal_source_v1", "task_id": 13}
+  },
+  "provider": "deepseek",
+  "source_manifest": {"path": "FORMAL_SOURCE_MANIFEST_V1.json", "sha256": "8dbbd43a711cff57d2b360d212995d15612610e3282e94ac33f31f9fb72f0a7e"},
+  "status": "PENDING_FORMAL_SOURCE_BLOCK_V3_USER_SIGNOFF_NO_LIVE_CALLS",
+  "study_kind": "formal_source_v1"
+}

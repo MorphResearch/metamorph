@@ -1,0 +1,18 @@
+{
+  "allowed_tokens": [
+    "t15-EMPTY",
+    "t15-M_F",
+    "t15-M_U",
+    "t15-RAW_F",
+    "t15-RAW_U"
+  ],
+  "block_id": "formal_receiver_block_01",
+  "evaluator_calls": 0,
+  "hard_cap_usd": "8.00",
+  "live_requests_authorized": false,
+  "pending_sha256": "30d3ec99a47f678cff08c774391dfcb2ca061c5f61662e929e4d98d30a3d5574",
+  "probe_content_read": false,
+  "provider_requests": 0,
+  "status": "PENDING_NO_LIVE_AUTHORIZATION",
+  "study_kind": "formal_receiver_v1"
+}
